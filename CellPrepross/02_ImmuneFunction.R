@@ -38,6 +38,9 @@ pbmc1 <- score_Calu(pbmc1, MAPK$gene, "MAPK")
 pbmc1 <- score_Calu(pbmc1, pyrop, "pyrop")
 pbmc1 <- score_Calu(pbmc1,IL1_genes, "IL1")
 scores<-pbmc1@meta.data;saveRDS(scores,file="0827_pbmc1_aucScore.rds")
+##scores loading
+scores<-readRDS("0827_pbmc1_aucScore.rds")
+pbmc1@meta.data<-scores
 
 ###(2)boxplot visualization
 Violin_Score_Adaptive_Sig <- function(pbmc1, plot_mode = c("cell_facet","score_single")){
@@ -240,6 +243,100 @@ plot_pdf_3cell_per_page <- function(plot_list, out_pdf){
 plt_cell <- Violin_Score_Adaptive_Sig(pbmc1, plot_mode = "cell_facet")
 plot_pdf_3cell_per_page(plt_cell, out_pdf = "cell_violin_output.pdf")
 
+###(3)specific mutation as one violin plot
+###### Violin_All_row
+Violin_All_row <- function(pbmc1, score, cell_order = c("CD14 Monocyte","CD16 Monocyte","pDC","Memory B"),
+                           violin_width = 0.5, boxplot_width = 0.35){
+  library(ggplot2); library(dplyr); library(patchwork)
+  DATA <- pbmc1@meta.data
+  if(!score %in% colnames(DATA)) stop("score not found in metadata")
+  all_levels <- c("HC","Polygenic","182LPIN2","181NOD2","183NOD2","200PSTPIP1","190PSTPIP1")
+  all_colors <- c("HC"="#6699CC","Polygenic"="#FEC260",
+                  "182LPIN2"="#E2A9C9","181NOD2"="#CBDAA9","183NOD2"="#B1DA99",
+                  "200PSTPIP1"="#7B1FA2","190PSTPIP1"="#FFEFC1")
+  DATA$group <- NA
+  DATA$group[DATA$datasets %in% paste0("C",1:6)] <- "HC"
+  DATA$group[DATA$datasets %in% paste0("ploy",1:6)] <- "Polygenic"
+  mono_ids <- c("181NOD2","182LPIN2","183NOD2","190PSTPIP1","200PSTPIP1")
+  DATA$group[DATA$datasets %in% mono_ids] <- DATA$datasets[DATA$datasets %in% mono_ids]
+  DATA <- DATA[!is.na(DATA$group) & DATA$celltype %in% cell_order, ]
+  DATA$group <- factor(DATA$group, levels = all_levels)
+  DATA$celltype <- factor(DATA$celltype, levels = cell_order)
+  comp_pairs <- combn(all_levels, 2, simplify = FALSE)
+  stats_list <- list()
+  for(ct in cell_order){
+    ct_data <- DATA[DATA$celltype == ct, ]
+    for(pair in comp_pairs){
+      g1 <- ct_data[[score]][ct_data$group == pair[1]]
+      g2 <- ct_data[[score]][ct_data$group == pair[2]]
+      if(length(g1) < 5 | length(g2) < 5 | all(is.na(g1)) | all(is.na(g2))) next
+      wt <- wilcox.test(g1, g2)
+      stats_list[[length(stats_list)+1]] <- data.frame(
+        celltype = ct, group1 = pair[1], group2 = pair[2],
+        n1 = length(g1), n2 = length(g2),
+        median1 = median(g1, na.rm = TRUE), median2 = median(g2, na.rm = TRUE),
+        p_value = wt$p.value, stringsAsFactors = FALSE)
+    }
+  }
+  if(length(stats_list) == 0){
+    stats_df <- data.frame(celltype=character(), group1=character(), group2=character(),
+                           n1=numeric(), n2=numeric(), median1=numeric(), median2=numeric(),
+                           p_value=numeric(), p_adj=numeric(), stringsAsFactors = FALSE)
+    sig_df <- stats_df
+  } else {
+    stats_df <- do.call(rbind, stats_list) %>% group_by(celltype) %>%
+      mutate(p_adj = p.adjust(p_value, method = "BH")) %>% arrange(celltype, p_adj) %>% as.data.frame()
+    sig_df <- stats_df[stats_df$p_adj < 0.05, ]
+  }
+  plot_list <- list()
+  for(i in seq_along(cell_order)){
+    ct <- cell_order[i]
+    ct_data <- DATA[DATA$celltype == ct, c("group", score)]
+    colnames(ct_data)[2] <- "score"
+    ct_data <- ct_data[!is.na(ct_data$score), ]
+    hc_mean <- mean(ct_data$score[ct_data$group == "HC"], na.rm = TRUE)
+    p <- ggplot(ct_data, aes(x = group, y = score, fill = group)) +
+      geom_violin(trim = FALSE, scale = "width", width = violin_width, color = NA) +
+      geom_boxplot(width = boxplot_width, color = "black", outlier.shape = NA, fill = NA) +
+      geom_hline(yintercept = hc_mean, linetype = "dashed", color = "gray50", linewidth = 0.5) +
+      scale_fill_manual(values = all_colors) +
+      labs(title = ct, x = "", y = ifelse(i == 1, score, "")) +
+      theme_classic() +
+      theme(plot.title = element_text(hjust = 0.5, size = 10),
+            plot.margin = margin(2, 2, 2, 2), legend.position = "none",
+            axis.ticks.x = element_blank(), axis.text.x = element_blank(),
+            axis.ticks.y = element_line(color = "black"),
+            axis.text.y = element_text(colour = "black", size = 8),
+            axis.title.y = element_text(colour = "black", size = 9))
+    plot_list[[ct]] <- p
+  }
+  combined <- wrap_plots(plot_list, ncol = length(cell_order)) + plot_layout(guides = "collect") &
+    theme(plot.margin = margin(2, 2, 2, 2))
+  cat("Score:", score, "| Cells:", paste(cell_order, collapse = ", "),
+      "| Total comparisons:", nrow(stats_df),
+      "| Significant (adj<0.05):", nrow(sig_df), "\n")
+  return(list(plot = combined, stats = stats_df, sig = sig_df))
+}
+
+res_nfkb <- Violin_All_row(pbmc1, score = "auc_NFKB",violin_width = 0.65, boxplot_width = 0.68)
+res_nfkb$plot
+res_mapk <- Violin_All_row(pbmc1, score = "auc_MAPK",violin_width = 0.65, boxplot_width = 0.68)
+res_mapk$plot
+res_ifn2 <- Violin_All_row(pbmc1, score = "auc_IFNII",violin_width = 0.65, boxplot_width = 0.68)
+res_ifn2$plot
+
+
+
+all_cells <- unique(pbmc1$celltype)
+res_nfkb <- Violin_All_row(pbmc1, score = "auc_NFKB", cell_order = all_cells,violin_width = 0.65, boxplot_width = 0.68)
+res_nfkb$plot
+res_mapk <- Violin_All_row(pbmc1, score = "auc_MAPK", cell_order = all_cells,violin_width = 0.65, boxplot_width = 0.68)
+res_mapk$plot
+res_ifn2 <- Violin_All_row(pbmc1, score = "auc_IFNII", cell_order = all_cells,violin_width = 0.65, boxplot_width = 0.68)
+res_ifn2$plot
+
+
+
 #####2 ----Immune signature score by PROGENY-----
 library(progeny)
 library(AUCell)
@@ -352,7 +449,6 @@ Vln_Seurat_AllCell <- function(seu_obj, genes, assay = "RNA"){
   }
   return(plot_list)
 }
-
 plist <- Vln_Seurat_AllCell(pbmc1, genes = IFN28)
 plist2 <- Vln_Seurat_AllCell(pbmc1, genes = pyrop)
 
@@ -476,8 +572,16 @@ target_gene_full <- list(
   list(gene = "NLRC4",   cell = c("CD16 Monocyte")),
   list(gene = "NLRP1",   cell = c("Cytotoxic CD8 T","Treg","NK"))
 )
+target_gene_full2<-list(
+  list(gene="TNF",cell=c("CD14 Monocyte","CD16 Monocyte")),
+  list(gene="IL6",cell=c("CD14 Monocyte","CD16 Monocyte")),
+  list(gene="IL18",cell=c("CD14 Monocyte","CD16 Monocyte")),
+  list(gene="CXCL8",cell=c("CD14 Monocyte","CD16 Monocyte")),
+  list(gene="IL1B",cell=c("CD14 Monocyte","CD16 Monocyte"))
+  
+)
 
-vio_seu <- VioplotRun(sce1 = pbmc1, mode = "seurattype", target_list = target_gene_full)
+vio_seu <- VioplotRun(sce1 = pbmc1, mode = "seurattype", target_list = target_gene_full2)
 #vio_gg  <- VioplotRun(sce1 = pbmc1, mode = "ggplottype", target_list = target_gene_full)
 vio_seu_out <- list()
 for(k in names(vio_seu)){
