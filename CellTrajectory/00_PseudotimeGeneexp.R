@@ -1,4 +1,3 @@
-
 library(Seurat)
 library(slingshot)
 library(SingleCellExperiment)
@@ -91,6 +90,14 @@ dpt<-read.csv("E:\\Cohort PPT\\JIA\\code\\CellTrajectory\\dpt_pseudotime.csv")
 ncol(pbmc_mono)
 dim(dpt)
 pbmc_mono@meta.data$dpt_pseudotime<-dpt[match(rownames(pbmc_mono@meta.data),dpt$X),"dpt_pseudotime"]
+
+
+######5 plantir
+pal<-read.csv("E:\\Cohort PPT\\JIA\\code\\CellTrajectory\\palantir_pseudotime.csv")
+ncol(pbmc_mono)
+dim(pal)
+pbmc_mono@meta.data$palantir_pseudotime<-pal[match(rownames(pbmc_mono@meta.data),pal$X),"X0"]
+sum(is.na(pbmc_mono$palantir_pseudotime))
 
 
 ######5 check data
@@ -400,7 +407,7 @@ plot_gene_pt <- function(seurat_obj, genes, pt_col, celltype,
 }
 
 
-###### Read RDS
+###### Read RDS, downstream
 res_sling    <- readRDS("res_sling_genomewide.RDS")
 res_scorpius <- readRDS("res_scorpius_genomewide.RDS")
 res_monocle3 <- readRDS("res_monocle3_genomewide.RDS")
@@ -603,5 +610,491 @@ plots_supp <- plot_gene_pt_multi(pbmc_mono, tier2_map, celltype = "CD14 Monocyte
 sup<-plots_supp$LGALS1$scorpius_pseudotime | plots_supp$SLC11A1$scorpius_pseudotime | plots_supp$FTL$scorpius_pseudotime | plots_supp$TXNIP$dpt_pseudotime
 
 
+################################################
+################################################
+########0916 revised  as single monogenic patient
+#######1 loading data and group
+###### Load packages
+setwd("E:\\Cohort PPT\\JIA\\code\\CellTrajectory")
+library(Seurat); library(dplyr); library(ggplot2); library(patchwork)
+###### Read data
+pbmc_mono <- readRDS("E:/Cohort PPT/JIA/code/CellTrajectory/pbmc_mono.RDS")
+all_results <- readRDS("E:/Cohort PPT/JIA/code/CellTrajectory/genomewide_pt_mono_only.RDS")
+###### Recreate group_mono annotation
+pbmc_mono$group_mono <- NA
+pbmc_mono$group_mono[pbmc_mono$datasets %in% paste0("C",1:6)] <- "HC"
+mono_ids <- c("181NOD2","182LPIN2","183NOD2","190PSTPIP1","200PSTPIP1")
+pbmc_mono$group_mono[pbmc_mono$datasets %in% mono_ids] <- pbmc_mono$datasets[pbmc_mono$datasets %in% mono_ids]
+pbmc_mono$group_mono <- factor(pbmc_mono$group_mono, levels = c("HC", mono_ids))
+table(pbmc_mono$group_mono, useNA = "ifany")
+###### filter_by_cor (adapted for new structure)
+filter_by_cor <- function(res_df, cor_threshold = 0.4){
+  genes_keep <- res_df %>% group_by(gene) %>%
+    summarise(max_abs_cor = max(abs(cor), na.rm = TRUE), .groups = "drop") %>%
+    filter(max_abs_cor > cor_threshold) %>% pull(gene)
+  res_filtered <- res_df[res_df$gene %in% genes_keep, ]
+  res_filtered <- res_filtered[order(res_filtered$gene, res_filtered$group), ]
+  return(res_filtered)
+}
+
+#######2 ploting for 4 time and output
+###### plot_gene_pt (batch: all filtered genes, one celltype, one pt method)
+plot_gene_pt <- function(seurat_obj, genes, pt_col, celltype,
+                         colors = c("HC"="#6699CC","181NOD2"="#CBDAA9","182LPIN2"="#E2A9C9",
+                                    "183NOD2"="#B1DA99","190PSTPIP1"="#FFEFC1","200PSTPIP1"="#7B1FA2"),
+                         group_col = "group_mono", ct_col = "celltype",
+                         assay = "RNA", slot = "data",
+                         show_ci = TRUE, line_lwd = 0.8, ncol = NULL){
+  library(ggplot2); library(Seurat); library(patchwork)
+  sub_obj <- seurat_obj[, seurat_obj@meta.data[[ct_col]] == celltype]
+  cat("Celltype:", celltype, "| Genes:", length(genes), "| Cells:", ncol(sub_obj), "\n")
+  p_list <- list()
+  for(gene in genes){
+    if(!gene %in% rownames(sub_obj[[assay]])){ cat("Skip", gene, "\n"); next }
+    expr <- GetAssayData(sub_obj, assay = assay, slot = slot)[gene, ]
+    df <- data.frame(pt = sub_obj@meta.data[[pt_col]],
+                     group = as.character(sub_obj@meta.data[[group_col]]),
+                     expression = as.numeric(expr), row.names = colnames(sub_obj))
+    df <- df[!is.na(df$pt) & !is.na(df$group) & !is.na(df$expression), ]
+    df$group <- factor(df$group, levels = names(colors))
+    df <- df[!is.na(df$group), ]
+    if(nrow(df) < 10) next
+    p <- ggplot(df, aes(x = pt, y = expression, color = group, fill = group)) +
+      geom_smooth(method = "loess", se = show_ci, linewidth = line_lwd,
+                  alpha = ifelse(show_ci, 0.15, NA)) +
+      coord_cartesian(ylim = c(0, NA)) +
+      scale_color_manual(values = colors) +
+      scale_fill_manual(values = colors) +
+      labs(x = "Pseudotime", y = "Expression", title = gene, color = NULL, fill = NULL) +
+      theme_classic() +
+      theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+            axis.line = element_blank(),
+            axis.text = element_text(color = "black"),
+            axis.title = element_text(color = "black"),
+            plot.title = element_text(hjust = 0.5, size = 9, face = "italic"),
+            legend.position = "right")
+    p_list[[gene]] <- p
+  }
+  if(is.null(ncol)) ncol <- ceiling(sqrt(length(p_list)))
+  combined <- wrap_plots(p_list, ncol = ncol)
+  return(list(plots = p_list, combined = combined))
+}
+
+genes_cd14_sling <- unique(filter_by_cor(all_results$CD14$sling, 0.4)$gene)
+cat("CD14 sling genes:", length(genes_cd14_sling), "\n")
+p <- plot_gene_pt(pbmc_mono, genes = genes_cd14_sling,
+                  pt_col = "sling_pseudotime", celltype = "CD14 Monocyte")
+p$plots[[1]]
+
+###### output_plots_to_pdf
+output_plots_to_pdf <- function(plot_list, output_file, ncol = 4, nrow = 4,
+                                title = NULL, width = 16, height = 12){
+  n_per_page <- ncol * nrow
+  n_plots <- length(plot_list)
+  n_pages <- ceiling(n_plots / n_per_page)
+  cat("Total plots:", n_plots, "| Pages:", n_pages, "\n")
+  pdf(output_file, width = width, height = height)
+  for(i in seq_len(n_pages)){
+    start_idx <- (i-1) * n_per_page + 1
+    end_idx <- min(i * n_per_page, n_plots)
+    page_plots <- plot_list[start_idx:end_idx]
+    p <- wrap_plots(page_plots, ncol = ncol) +
+      plot_annotation(title = if(!is.null(title)) paste0(title, " (page ", i, "/", n_pages, ")") else NULL,
+                      theme = theme(plot.title = element_text(hjust = 0.5, size = 12)))
+    print(p)
+  }
+  dev.off()
+  cat("Saved:", output_file, "\n")
+}
+
+###### Batch: CD14
+genes_cd14_sling <- unique(filter_by_cor(all_results$CD14$sling, 0.4)$gene)
+p_cd14_sling <- plot_gene_pt(pbmc_mono, genes_cd14_sling, "sling_pseudotime", "CD14 Monocyte")
+output_plots_to_pdf(p_cd14_sling$plots, "CD14_sling_cor04.pdf", title = "CD14 - Slingshot (|cor|>0.4)")
+
+genes_cd14_scorpius <- unique(filter_by_cor(all_results$CD14$scorpius, 0.4)$gene)
+p_cd14_scorpius <- plot_gene_pt(pbmc_mono, genes_cd14_scorpius, "scorpius_pseudotime", "CD14 Monocyte")
+output_plots_to_pdf(p_cd14_scorpius$plots, "CD14_scorpius_cor04.pdf", title = "CD14 - SCORPIUS (|cor|>0.4)")
+
+genes_cd14_monocle3 <- unique(filter_by_cor(all_results$CD14$monocle3, 0.4)$gene)
+p_cd14_monocle3 <- plot_gene_pt(pbmc_mono, genes_cd14_monocle3, "monocle3_pseudotime", "CD14 Monocyte")
+output_plots_to_pdf(p_cd14_monocle3$plots, "CD14_monocle3_cor04.pdf", title = "CD14 - Monocle3 (|cor|>0.4)")
+
+genes_cd14_dpt <- unique(filter_by_cor(all_results$CD14$dpt, 0.4)$gene)
+p_cd14_dpt <- plot_gene_pt(pbmc_mono, genes_cd14_dpt, "dpt_pseudotime", "CD14 Monocyte")
+output_plots_to_pdf(p_cd14_dpt$plots, "CD14_dpt_cor04.pdf", title = "CD14 - DPT (|cor|>0.4)")
+
+###### Batch: CD16
+genes_cd16_sling <- unique(filter_by_cor(all_results$CD16$sling, 0.4)$gene)
+p_cd16_sling <- plot_gene_pt(pbmc_mono, genes_cd16_sling, "sling_pseudotime", "CD16 Monocyte")
+output_plots_to_pdf(p_cd16_sling$plots, "CD16_sling_cor04.pdf", title = "CD16 - Slingshot (|cor|>0.4)")
+
+genes_cd16_scorpius <- unique(filter_by_cor(all_results$CD16$scorpius, 0.4)$gene)
+p_cd16_scorpius <- plot_gene_pt(pbmc_mono, genes_cd16_scorpius, "scorpius_pseudotime", "CD16 Monocyte")
+output_plots_to_pdf(p_cd16_scorpius$plots, "CD16_scorpius_cor04.pdf", title = "CD16 - SCORPIUS (|cor|>0.4)")
+
+genes_cd16_monocle3 <- unique(filter_by_cor(all_results$CD16$monocle3, 0.4)$gene)
+p_cd16_monocle3 <- plot_gene_pt(pbmc_mono, genes_cd16_monocle3, "monocle3_pseudotime", "CD16 Monocyte")
+output_plots_to_pdf(p_cd16_monocle3$plots, "CD16_monocle3_cor04.pdf", title = "CD16 - Monocle3 (|cor|>0.4)")
+
+genes_cd16_dpt <- unique(filter_by_cor(all_results$CD16$dpt, 0.4)$gene)
+p_cd16_dpt <- plot_gene_pt(pbmc_mono, genes_cd16_dpt, "dpt_pseudotime", "CD16 Monocyte")
+output_plots_to_pdf(p_cd16_dpt$plots, "CD16_dpt_cor04.pdf", title = "CD16 - DPT (|cor|>0.4)")
 
 
+#####################################0922 adding plantir and for indepent monogenic patients
+setwd("E:\\Cohort PPT\\JIA\\code\\CellTrajectory")
+library(Seurat); library(dplyr); library(ggplot2); library(patchwork)
+###### Read data
+pbmc_mono <- readRDS("E:/Cohort PPT/JIA/code/CellTrajectory/pbmc_mono.RDS")
+all_results <- readRDS("E:/Cohort PPT/JIA/code/CellTrajectory/genomewide_pt_mono_only.RDS")
+###### Recreate group_mono annotation
+pbmc_mono$group_mono <- NA
+pbmc_mono$group_mono[pbmc_mono$datasets %in% paste0("C",1:6)] <- "HC"
+mono_ids <- c("181NOD2","182LPIN2","183NOD2","190PSTPIP1","200PSTPIP1")
+pbmc_mono$group_mono[pbmc_mono$datasets %in% mono_ids] <- pbmc_mono$datasets[pbmc_mono$datasets %in% mono_ids]
+pbmc_mono$group_mono <- factor(pbmc_mono$group_mono, levels = c("HC", mono_ids))
+table(pbmc_mono$group_mono, useNA = "ifany")
+
+
+###### filter_by_cor
+filter_by_cor <- function(res_df, cor_threshold = 0.4){
+  genes_keep <- res_df %>% group_by(gene) %>%
+    summarise(max_abs_cor = max(abs(cor), na.rm = TRUE), .groups = "drop") %>%
+    filter(max_abs_cor > cor_threshold) %>% pull(gene)
+  res_df[res_df$gene %in% genes_keep, ]
+}
+
+###### plot_gene_pt
+plot_gene_pt <- function(seurat_obj, genes, pt_col, celltype = NULL,
+                         colors = c("HC"="#6699CC","181NOD2"="#CBDAA9","182LPIN2"="#E2A9C9",
+                                    "183NOD2"="#B1DA99","190PSTPIP1"="#FFEFC1","200PSTPIP1"="#7B1FA2"),
+                         group_col = "group_mono", ct_col = "celltype",
+                         assay = "RNA", slot = "data",
+                         show_ci = TRUE, line_lwd = 0.8, ncol = NULL){
+  if(!is.null(celltype)){
+    sub_obj <- seurat_obj[, seurat_obj@meta.data[[ct_col]] == celltype]
+  } else {
+    sub_obj <- seurat_obj
+  }
+  cat("Genes:", length(genes), "| Cells:", ncol(sub_obj), "\n")
+  p_list <- list()
+  for(gene in genes){
+    if(!gene %in% rownames(sub_obj[[assay]])) next
+    expr <- GetAssayData(sub_obj, assay = assay, slot = slot)[gene, ]
+    df <- data.frame(pt = sub_obj@meta.data[[pt_col]],
+                     group = as.character(sub_obj@meta.data[[group_col]]),
+                     expression = as.numeric(expr), row.names = colnames(sub_obj))
+    df <- df[!is.na(df$pt) & !is.na(df$group) & !is.na(df$expression), ]
+    df$group <- factor(df$group, levels = names(colors))
+    df <- df[!is.na(df$group), ]
+    if(nrow(df) < 10) next
+    p <- ggplot(df, aes(x = pt, y = expression, color = group, fill = group)) +
+      geom_smooth(method = "loess", se = show_ci, linewidth = line_lwd,
+                  alpha = ifelse(show_ci, 0.15, NA)) +
+      coord_cartesian(ylim = c(0, NA)) +
+      scale_color_manual(values = colors) +
+      scale_fill_manual(values = colors) +
+      labs(x = "Pseudotime", y = "Expression", title = gene, color = NULL, fill = NULL) +
+      theme_classic() +
+      theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+            axis.line = element_blank(),
+            axis.text = element_text(color = "black"),
+            axis.title = element_text(color = "black"),
+            plot.title = element_text(hjust = 0.5, size = 9, face = "italic"),
+            legend.position = "right")
+    p_list[[gene]] <- p
+  }
+  if(is.null(ncol)) ncol <- ceiling(sqrt(length(p_list)))
+  combined <- wrap_plots(p_list, ncol = ncol)
+  return(list(plots = p_list, combined = combined))
+}
+
+###### output_plots_to_pdf
+output_plots_to_pdf <- function(plot_list, output_file, ncol = 4, nrow = 4,
+                                title = NULL, width = 16, height = 12){
+  n_per_page <- ncol * nrow
+  n_plots <- length(plot_list)
+  n_pages <- ceiling(n_plots / n_per_page)
+  cat("Total plots:", n_plots, "| Pages:", n_pages, "\n")
+  pdf(output_file, width = width, height = height)
+  for(i in seq_len(n_pages)){
+    start_idx <- (i-1) * n_per_page + 1
+    end_idx <- min(i * n_per_page, n_plots)
+    page_plots <- plot_list[start_idx:end_idx]
+    p <- wrap_plots(page_plots, ncol = ncol) +
+      plot_annotation(title = if(!is.null(title)) paste0(title, " (page ", i, "/", n_pages, ")") else NULL,
+                      theme = theme(plot.title = element_text(hjust = 0.5, size = 12)))
+    print(p)
+  }
+  dev.off()
+  cat("Saved:", output_file, "\n")
+}
+
+###### Check data structure
+cat("CD14 methods:", paste(names(all_results$CD14), collapse = ", "), "\n")
+cat("CD14_CD16 methods:", paste(names(all_results$CD14_CD16), collapse = ", "), "\n")
+
+###### CD14
+methods <- c("sling","scorpius","monocle3","dpt","palantir")
+pt_cols <- c(sling="sling_pseudotime", scorpius="scorpius_pseudotime",
+             monocle3="monocle3_pseudotime", dpt="dpt_pseudotime",
+             palantir="palantir_pseudotime")
+for(m in methods){
+  if(!m %in% names(all_results$CD14)){ cat("Skip CD14", m, "\n"); next }
+  genes <- unique(filter_by_cor(all_results$CD14[[m]], 0.4)$gene)
+  cat("\nCD14", m, ":", length(genes), "genes\n")
+  p <- plot_gene_pt(pbmc_mono, genes, pt_cols[m], celltype = "CD14 Monocyte")
+  output_plots_to_pdf(p$plots, paste0("CD14_", m, "_cor04.pdf"),
+                      title = paste0("CD14 - ", tools::toTitleCase(m), " (|cor|>0.4)"))
+}
+
+###### CD14_CD16 (no celltype filter)
+for(m in methods){
+  if(!m %in% names(all_results$CD14_CD16)){ cat("Skip CD14_CD16", m, "\n"); next }
+  genes <- unique(filter_by_cor(all_results$CD14_CD16[[m]], 0.4)$gene)
+  cat("\nCD14_CD16", m, ":", length(genes), "genes\n")
+  p <- plot_gene_pt(pbmc_mono, genes, pt_cols[m], celltype = NULL)
+  output_plots_to_pdf(p$plots, paste0("CD14CD16_", m, "_cor04.pdf"),
+                      title = paste0("CD14+CD16 - ", tools::toTitleCase(m), " (|cor|>0.4)"))
+}
+
+######check data
+meta <- pbmc_mono@meta.data
+meta <- meta[meta$celltype %in% c("CD14 Monocyte","CD16 Monocyte"), ]
+pt_methods <- c("sling_pseudotime","scorpius_pseudotime","monocle3_pseudotime","dpt_pseudotime","palantir_pseudotime")
+patients <- c("181NOD2","182LPIN2","183NOD2","190PSTPIP1","200PSTPIP1")
+res_list <- list()
+for(pt in pt_methods){
+  for(ptnt in patients){
+    sub <- meta[meta$datasets == ptnt, ]
+    if(nrow(sub) < 10) next
+    med14 <- median(sub[[pt]][sub$celltype == "CD14 Monocyte"], na.rm = TRUE)
+    med16 <- median(sub[[pt]][sub$celltype == "CD16 Monocyte"], na.rm = TRUE)
+    res_list[[length(res_list)+1]] <- data.frame(
+      method = gsub("_pseudotime","",pt),
+      patient = ptnt,
+      median_CD14 = round(med14, 4),
+      median_CD16 = round(med16, 4),
+      CD16_higher = med16 > med14
+    )
+  }
+}
+dir_df <- do.call(rbind, res_list)
+dir_df<-dir_df[dir_df$CD16_higher=="TRUE",]
+
+
+###### Plot gene across valid patient×method combinations
+###### Batch: boxplot + loess for all valid combos
+plot_gene_batch <- function(seurat_obj, gene, valid_df,
+                            ct_colors = c("CD14 Monocyte"="#6699CC","CD16 Monocyte"="#F49D5C"),
+                            line_color = "#6699CC",
+                            assay = "RNA", slot = "data"){
+  library(ggplot2); library(patchwork); library(dplyr)
+  pt_col_map <- c(sling="sling_pseudotime", scorpius="scorpius_pseudotime",
+                  monocle3="monocle3_pseudotime", dpt="dpt_pseudotime",
+                  palantir="palantir_pseudotime")
+  valid_df <- valid_df[valid_df$CD16_higher == TRUE, ]
+  box_list <- list()
+  loess_list <- list()
+  for(i in seq_len(nrow(valid_df))){
+    ptm <- valid_df$method[i]
+    ptnt <- valid_df$patient[i]
+    pt_col <- pt_col_map[ptm]
+    sub <- seurat_obj[, seurat_obj$datasets == ptnt]
+    meta <- sub@meta.data
+    meta <- meta[!is.na(meta[[pt_col]]), ]
+    meta$celltype <- factor(meta$celltype, levels = names(ct_colors))
+    meta <- meta[!is.na(meta$celltype), ]
+    p_box <- ggplot(meta, aes(x = celltype, y = .data[[pt_col]], fill = celltype)) +
+      geom_boxplot(width = 0.4, color = "black", outlier.shape = NA) +
+      scale_fill_manual(values = ct_colors) +
+      labs(title = paste0(ptnt,"|",ptm), x = "", y = "") +
+      theme_classic() +
+      theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+            axis.line = element_blank(),
+            plot.title = element_text(hjust = 0.5, size = 7),
+            legend.position = "none",
+            axis.text.x = element_text(angle = 45, hjust = 1, size = 6, color = "black"),
+            axis.text.y = element_text(color = "black", size = 6))
+    box_list[[paste0(ptnt,"_",ptm)]] <- p_box
+    expr <- GetAssayData(sub, assay = assay, slot = slot)[gene, ]
+    df2 <- data.frame(pt = sub@meta.data[[pt_col]],
+                      expression = as.numeric(expr))
+    df2 <- df2[!is.na(df2$pt) & !is.na(df2$expression), ]
+    p_loess <- ggplot(df2, aes(x = pt, y = expression)) +
+      geom_smooth(method = "loess", se = TRUE, linewidth = 0.8, alpha = 0.15, color = line_color, fill = line_color) +
+      labs(title = paste0(ptnt,"|",ptm), x = "", y = "") +
+      theme_classic() +
+      theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+            axis.line = element_blank(),
+            plot.title = element_text(hjust = 0.5, size = 7),
+            axis.text = element_text(color = "black", size = 6))
+    loess_list[[paste0(ptnt,"_",ptm)]] <- p_loess
+  }
+  ncol <- ceiling(sqrt(length(box_list)))
+  out <- list(
+    boxplot = wrap_plots(box_list, ncol = ncol),
+    loess = wrap_plots(loess_list, ncol = ncol)
+  )
+  return(out)
+}
+
+res <- plot_gene_batch(pbmc_mono, IFN1$gene[33], dir_df[dir_df$patient=="181NOD2",])
+res$loess 
+#res$boxplot
+c("TRIM16","DDX60","IFIT5")#182LPIN2
+
+
+
+
+list(
+  c("182LPIN2","IFI30","SCROPIUS") ,
+  c("200PSTPIP1","IFI30","SCROPIUS"),
+  c("182LPIN2","LGALS3","SCROPIUS") ,
+  c("200PSTPIP1","LGALS3","SCROPIUS"),
+  c("182LPIN2","HLA-DRA","SCROPIUS") ,
+  c("200PSTPIP1","HLA-DRA","SCROPIUS"),
+)
+
+
+###### Batch: loess curves per patient per gene (20 per page)
+plot_gene_pdf <- function(seurat_obj, gene_vec, valid_df, out_dir = ".",
+                          line_color = "#6699CC",
+                          assay = "RNA", slot = "data"){
+  library(ggplot2); library(dplyr); library(patchwork)
+  pt_col_map <- c(sling="sling_pseudotime", scorpius="scorpius_pseudotime",
+                  monocle3="monocle3_pseudotime", dpt="dpt_pseudotime",
+                  palantir="palantir_pseudotime")
+  valid_df <- valid_df[valid_df$CD16_higher == TRUE, ]
+  patients <- unique(valid_df$patient)
+  for(ptnt in patients){
+    sub_df <- valid_df[valid_df$patient == ptnt, ]
+    methods <- sub_df$method
+    methods <- methods[methods %in% names(pt_col_map)]
+    if(length(methods) == 0) next
+    sub <- seurat_obj[, seurat_obj$datasets == ptnt]
+    p_list <- list()
+    idx <- 0
+    for(gene in gene_vec){
+      if(!gene %in% rownames(sub[[assay]])) next
+      expr <- GetAssayData(sub, assay = assay, slot = slot)[gene, ]
+      for(ptm in methods){
+        pt_col <- pt_col_map[ptm]
+        df2 <- data.frame(pt = sub@meta.data[[pt_col]],
+                          expression = as.numeric(expr))
+        df2 <- df2[!is.na(df2$pt) & !is.na(df2$expression), ]
+        p <- ggplot(df2, aes(x = pt, y = expression)) +
+          geom_smooth(method = "loess", se = TRUE, linewidth = 0.7, alpha = 0.15,
+                      color = line_color, fill = line_color) +
+          labs(title = paste0(gene, " | ", ptm), x = "", y = "") +
+          theme_classic() +
+          theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+                axis.line = element_blank(),
+                plot.title = element_text(hjust = 0.5, size = 8, face = "italic"),
+                axis.text = element_text(color = "black", size = 6))
+        idx <- idx + 1
+        p_list[[idx]] <- p
+      }
+    }
+    if(length(p_list) == 0) next
+    n_per_page <- 20
+    n_pages <- ceiling(length(p_list) / n_per_page)
+    pdf(file.path(out_dir, paste0(ptnt, "_genes_loess.pdf")), width = 16, height = 18)
+    for(pg in seq_len(n_pages)){
+      start_idx <- (pg-1)*n_per_page + 1
+      end_idx <- min(pg*n_per_page, length(p_list))
+      page_plots <- p_list[start_idx:end_idx]
+      print(wrap_plots(page_plots, ncol = 4))
+    }
+    dev.off()
+    cat("Saved:", ptnt, "_genes_loess.pdf", "|", length(p_list), "plots |", n_pages, "pages\n")
+  }
+}
+
+plot_gene_pdf(pbmc_mono, gene_vec = c("LYZ","S100A8","S100A9","FCGR3B","CD14","VCAN",IFN1$gene),
+              valid_df = dir_df, out_dir = ".")
+
+#####plot for figures
+###### Final: boxplot + gene loess per timepoint
+###### Final: boxplot + gene loess per timepoint
+plot_pt_gene_final <- function(seurat_obj, patient, gene_vec, pt_cols,
+                               curve_color = "#E2A9C9",
+                               ct_colors = c("CD14 Monocyte"="#AF478A","CD16 Monocyte"="#EC706E"),
+                               assay = "RNA", slot = "data"){
+  library(ggplot2); library(patchwork)
+  sub <- seurat_obj[, seurat_obj$datasets == patient]
+  cat("Patient:", patient, "| Cells:", ncol(sub), "\n")
+  row_list <- list()
+  n_rows <- length(pt_cols)
+  for(r in seq_along(pt_cols)){
+    pt_col <- pt_cols[r]
+    meta <- sub@meta.data
+    meta <- meta[!is.na(meta[[pt_col]]), ]
+    meta$celltype <- factor(meta$celltype, levels = names(ct_colors))
+    meta <- meta[!is.na(meta$celltype), ]
+    wt <- wilcox.test(meta[[pt_col]][meta$celltype == "CD14 Monocyte"],
+                      meta[[pt_col]][meta$celltype == "CD16 Monocyte"])
+    p_str <- ifelse(wt$p.value < 2.2e-16, "<2.2e-16", formatC(wt$p.value, format = "e", digits = 2))
+    vals <- meta[[pt_col]]
+    ymin <- min(vals, na.rm = TRUE); ymax <- max(vals, na.rm = TRUE)
+    y_range <- ymax - ymin
+    y_bracket <- ymax + 0.08*y_range
+    is_last <- (r == n_rows)
+    p_box <- ggplot(meta, aes(x = celltype, y = .data[[pt_col]], fill = celltype)) +
+      geom_boxplot(width = 0.4, color = "black", outlier.shape = NA) +
+      scale_fill_manual(values = ct_colors) +
+      scale_y_continuous(limits = c(ymin - 0.02*y_range, y_bracket + 0.12*y_range), expand = c(0,0)) +
+      annotate("segment", x = 1, xend = 2, y = y_bracket, yend = y_bracket, color = "black", linewidth = 0.5) +
+      annotate("segment", x = 1, xend = 1, y = y_bracket - 0.02*y_range, yend = y_bracket, color = "black", linewidth = 0.5) +
+      annotate("segment", x = 2, xend = 2, y = y_bracket - 0.02*y_range, yend = y_bracket, color = "black", linewidth = 0.5) +
+      annotate("text", x = 1.5, y = y_bracket + 0.02*y_range, label = paste0("P=",p_str), size = 3, fontface = "italic") +
+      labs(title = pt_col, x = "", y = "") +
+      theme_classic() +
+      theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+            axis.line = element_blank(),
+            plot.title = element_text(hjust = 0.5, size = 8),
+            legend.position = "none",
+            axis.text.x = element_text(angle = 45, hjust = 1, size = 7, color = "black"),
+            axis.ticks.x = element_line(color = "black"),
+            axis.text.y = element_text(color = "black", size = 7),
+            plot.margin = margin(2, 2, 2, 2))
+    if(!is_last){
+      p_box <- p_box + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+    }
+    gene_plots <- list()
+    for(gene in gene_vec){
+      if(!gene %in% rownames(sub[[assay]])) next
+      expr <- GetAssayData(sub, assay = assay, slot = slot)[gene, ]
+      df2 <- data.frame(pt = sub@meta.data[[pt_col]],
+                        expression = as.numeric(expr))
+      df2 <- df2[!is.na(df2$pt) & !is.na(df2$expression), ]
+      p_g <- ggplot(df2, aes(x = pt, y = expression)) +
+        geom_smooth(method = "loess", se = TRUE, linewidth = 0.8, alpha = 0.15,
+                    color = curve_color, fill = curve_color) +
+        labs(title = gene, x = "", y = "") +
+        theme_classic() +
+        theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+              axis.line = element_blank(),
+              plot.title = element_text(hjust = 0.5, size = 8, face = "italic"),
+              axis.text = element_text(color = "black", size = 7),
+              plot.margin = margin(2, 2, 2, 2))
+      if(!is_last){
+        p_g <- p_g + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+      }
+      gene_plots[[gene]] <- p_g
+    }
+    row_combined <- p_box | wrap_plots(gene_plots, ncol = length(gene_plots))
+    row_combined <- row_combined + plot_layout(widths = c(0.6, length(gene_plots)))
+    row_list[[pt_col]] <- row_combined
+  }
+  final <- wrap_plots(row_list, ncol = 1) +
+    plot_layout(heights = rep(1, n_rows))
+  return(final)
+}
+
+p <- plot_pt_gene_final(pbmc_mono, patient = "182LPIN2",
+                        gene_vec = c("RSAD2","IFIT5","DDX58"),
+                        pt_cols = c("sling_pseudotime","scorpius_pseudotime"),
+                        curve_color = "#E2A9C9")
+p
