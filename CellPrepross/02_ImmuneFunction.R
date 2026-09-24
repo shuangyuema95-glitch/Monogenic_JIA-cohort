@@ -245,6 +245,8 @@ plot_pdf_3cell_per_page(plt_cell, out_pdf = "cell_violin_output.pdf")
 
 ###(3)specific mutation as one violin plot
 ###### Violin_All_row
+###### Violin_All_row
+###### Violin_All_row
 Violin_All_row <- function(pbmc1, score, cell_order = c("CD14 Monocyte","CD16 Monocyte","pDC","Memory B"),
                            violin_width = 0.5, boxplot_width = 0.35){
   library(ggplot2); library(dplyr); library(patchwork)
@@ -263,9 +265,11 @@ Violin_All_row <- function(pbmc1, score, cell_order = c("CD14 Monocyte","CD16 Mo
   DATA$group <- factor(DATA$group, levels = all_levels)
   DATA$celltype <- factor(DATA$celltype, levels = cell_order)
   comp_pairs <- combn(all_levels, 2, simplify = FALSE)
-  stats_list <- list()
+  stats_list <- list(); kw_list <- list(); sig_cells <- c()
   for(ct in cell_order){
     ct_data <- DATA[DATA$celltype == ct, ]
+    kw <- kruskal.test(ct_data[[score]] ~ ct_data$group)
+    kw_list[[ct]] <- data.frame(celltype = ct, score = score, kw_p = kw$p.value, stringsAsFactors = FALSE)
     for(pair in comp_pairs){
       g1 <- ct_data[[score]][ct_data$group == pair[1]]
       g2 <- ct_data[[score]][ct_data$group == pair[2]]
@@ -278,31 +282,31 @@ Violin_All_row <- function(pbmc1, score, cell_order = c("CD14 Monocyte","CD16 Mo
         p_value = wt$p.value, stringsAsFactors = FALSE)
     }
   }
-  if(length(stats_list) == 0){
-    stats_df <- data.frame(celltype=character(), group1=character(), group2=character(),
-                           n1=numeric(), n2=numeric(), median1=numeric(), median2=numeric(),
-                           p_value=numeric(), p_adj=numeric(), stringsAsFactors = FALSE)
-    sig_df <- stats_df
-  } else {
-    stats_df <- do.call(rbind, stats_list) %>% group_by(celltype) %>%
-      mutate(p_adj = p.adjust(p_value, method = "BH")) %>% arrange(celltype, p_adj) %>% as.data.frame()
-    sig_df <- stats_df[stats_df$p_adj < 0.05, ]
+  kw_df <- do.call(rbind, kw_list)
+  kw_df$kw_padj <- p.adjust(kw_df$kw_p, method = "BH")
+  fmt_p <- function(p){
+    if(p < 2.2e-16) return("< 2.2e-16")
+    formatC(p, format = "e", digits = 2)
   }
   plot_list <- list()
   for(i in seq_along(cell_order)){
     ct <- cell_order[i]
-    ct_data <- DATA[DATA$celltype == ct, c("group", score)]
-    colnames(ct_data)[2] <- "score"
-    ct_data <- ct_data[!is.na(ct_data$score), ]
-    hc_mean <- mean(ct_data$score[ct_data$group == "HC"], na.rm = TRUE)
-    p <- ggplot(ct_data, aes(x = group, y = score, fill = group)) +
+    ct_data <- DATA[DATA$celltype == ct, ]
+    kw_padj <- kw_df$kw_padj[kw_df$celltype == ct]
+    p_str <- fmt_p(kw_padj)
+    if(kw_padj < 0.05) sig_cells <- c(sig_cells, ct)
+    hc_mean <- mean(ct_data[[score]][ct_data$group == "HC"], na.rm = TRUE)
+    p <- ggplot(ct_data, aes(x = group, y = .data[[score]], fill = group)) +
       geom_violin(trim = FALSE, scale = "width", width = violin_width, color = NA) +
       geom_boxplot(width = boxplot_width, color = "black", outlier.shape = NA, fill = NA) +
       geom_hline(yintercept = hc_mean, linetype = "dashed", color = "gray50", linewidth = 0.5) +
       scale_fill_manual(values = all_colors) +
-      labs(title = ct, x = "", y = ifelse(i == 1, score, "")) +
+      labs(title = bquote(atop(.(ct), italic(P) == .(p_str))),
+           x = "", y = ifelse(i == 1, score, "")) +
       theme_classic() +
-      theme(plot.title = element_text(hjust = 0.5, size = 10),
+      theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+            axis.line = element_blank(),
+            plot.title = element_text(hjust = 0.5, size = 9),
             plot.margin = margin(2, 2, 2, 2), legend.position = "none",
             axis.ticks.x = element_blank(), axis.text.x = element_blank(),
             axis.ticks.y = element_line(color = "black"),
@@ -310,32 +314,40 @@ Violin_All_row <- function(pbmc1, score, cell_order = c("CD14 Monocyte","CD16 Mo
             axis.title.y = element_text(colour = "black", size = 9))
     plot_list[[ct]] <- p
   }
+  if(length(stats_list) == 0){
+    stats_df <- data.frame(celltype=character(), group1=character(), group2=character(),
+                           n1=numeric(), n2=numeric(), median1=numeric(), median2=numeric(),
+                           p_value=numeric(), p_adj=numeric(), stringsAsFactors = FALSE)
+  } else {
+    stats_df <- do.call(rbind, stats_list) %>% group_by(celltype) %>%
+      mutate(p_adj = p.adjust(p_value, method = "BH")) %>% arrange(celltype, p_adj) %>% as.data.frame()
+  }
   combined <- wrap_plots(plot_list, ncol = length(cell_order)) + plot_layout(guides = "collect") &
     theme(plot.margin = margin(2, 2, 2, 2))
-  cat("Score:", score, "| Cells:", paste(cell_order, collapse = ", "),
-      "| Total comparisons:", nrow(stats_df),
-      "| Significant (adj<0.05):", nrow(sig_df), "\n")
-  return(list(plot = combined, stats = stats_df, sig = sig_df))
+  cat("Score:", score, "| KW p.adj sig:", paste(sig_cells, collapse = ", "),
+      "| Wilcoxon sig:", sum(stats_df$p_adj < 0.05), "\n")
+  print(kw_df)
+  return(list(plot = combined, kw = kw_df, stats = stats_df,
+              sig = stats_df[stats_df$p_adj < 0.05, ], significant = sig_cells))
 }
 
-res_nfkb <- Violin_All_row(pbmc1, score = "auc_NFKB",violin_width = 0.65, boxplot_width = 0.68)
-res_nfkb$plot
-res_mapk <- Violin_All_row(pbmc1, score = "auc_MAPK",violin_width = 0.65, boxplot_width = 0.68)
-res_mapk$plot
-res_ifn2 <- Violin_All_row(pbmc1, score = "auc_IFNII",violin_width = 0.65, boxplot_width = 0.68)
-res_ifn2$plot
+all_cells <- c("CD14 Monocyte","CD16 Monocyte","pDC","NK","Cytotoxic CD8 T","Naive B","Memory B")
+res_nfkb <- Violin_All_row(pbmc1, score = "auc_NFKB", cell_order = all_cells, violin_width = 0.7, boxplot_width = 0.715)
+res_mapk <- Violin_All_row(pbmc1, score = "auc_MAPK", cell_order = all_cells, violin_width = 0.7, boxplot_width = 0.715)
+res_nfkb$plot / res_mapk$plot #main figure
 
+all_cells<-c("CD14 Monocyte","CD16 Monocyte","pDC")
+res_ifn2 <- Violin_All_row(pbmc1, score = "auc_IFNII", cell_order = all_cells, violin_width = 0.7, boxplot_width = 0.715)
+res_ifn1 <- Violin_All_row(pbmc1, score = "auc_IFNI", cell_order = all_cells, violin_width = 0.7, boxplot_width = 0.715)
+res_ifn1$plot | res_ifn2$plot #supplementary figure
 
-
-all_cells <- unique(pbmc1$celltype)
-res_nfkb <- Violin_All_row(pbmc1, score = "auc_NFKB", cell_order = all_cells,violin_width = 0.65, boxplot_width = 0.68)
-res_nfkb$plot
-res_mapk <- Violin_All_row(pbmc1, score = "auc_MAPK", cell_order = all_cells,violin_width = 0.65, boxplot_width = 0.68)
-res_mapk$plot
-res_ifn2 <- Violin_All_row(pbmc1, score = "auc_IFNII", cell_order = all_cells,violin_width = 0.65, boxplot_width = 0.68)
-res_ifn2$plot
-
-
+sig_nfkb <- res_nfkb$sig; sig_nfkb$score <- "auc_NFKB"
+sig_mapk <- res_mapk$sig; sig_mapk$score <- "auc_MAPK"
+sig_ifn2 <- res_ifn2$sig; sig_ifn2$score <- "auc_IFNII"
+sig_ifn1 <- res_ifn1$sig; sig_ifn1$score <- "auc_IFNI"
+all_sig <- rbind(sig_nfkb, sig_mapk, sig_ifn2,sig_ifn1)
+all_sig <- all_sig[, c("score","celltype","group1","group2","n1","n2","median1","median2","p_value","p_adj")]
+openxlsx::write.xlsx(all_sig, "E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\violin_wilcox_sig.xlsx", rowNames = FALSE)
 
 #####2 ----Immune signature score by PROGENY-----
 library(progeny)
@@ -870,8 +882,6 @@ gsea_full_df <- run_deg_gsea(de_res_filter)
 write.csv(gsea_full_df,"./CellPreprocess/gsea_all_celltype_comparison.csv",row.names=F)
 
 
-
-
 ###(3) Lolliplot 
 library(readxl)
 gsea_df <- read.csv("./CellPreprocess/gsea_all_celltype_comparison.csv",
@@ -945,5 +955,474 @@ p_gsealolli <- plot_gsea_lollipop(gsea_df, celltype_levels,
         cell_color_vec, size_range = c(1,6.5), x_angle = 90)
 p_gsealolli
 
+###############################
+###############################
+################pseudobulk DEG
+###### Load packages
+library(Seurat); library(dplyr); library(tidyr); library(tibble)
+library(DESeq2); library(clusterProfiler); library(msigdbr)
+library(scatterpie); library(tidytext)
+
+###### 1. Pseudobulk DEG
+cell_types <- unique(pbmc1$celltype)
+comp_list <- list(
+  Poly_vs_HC = c("Polygenic JIA", "Healthy controls"),
+  Mono_vs_Poly = c("Monogenic JIA", "Polygenic JIA"),
+  Mono_vs_HC = c("Monogenic JIA", "Healthy controls")
+)
+deg_list <- list()
+for(ct in cell_types){
+  sub <- subset(pbmc1, celltype == ct)
+  if(ncol(sub) < 10) next
+  for(nm in names(comp_list)){
+    g1 <- comp_list[[nm]][1]; g2 <- comp_list[[nm]][2]
+    m <- sub@meta.data
+    keep <- m$status %in% c(g1, g2)
+    if(sum(keep) < 10) next
+    sub2 <- sub[, keep]
+    m2 <- sub2@meta.data
+    if(!any(m2$status == g1) | !any(m2$status == g2)) next
+    s1 <- unique(m2$sample[m2$status == g1])
+    s2 <- unique(m2$sample[m2$status == g2])
+    if(length(s1) < 2 | length(s2) < 2) next
+    pseudo_mat <- AggregateExpression(sub2, group.by = "sample", assays = "RNA",
+                                      slot = "counts", return.seurat = FALSE)$RNA
+    if(is.null(pseudo_mat) | ncol(pseudo_mat) < 2) next
+    pseudo_meta <- m2[!duplicated(m2$sample), c("sample","status")]
+    rownames(pseudo_meta) <- pseudo_meta$sample
+    common_samples <- intersect(colnames(pseudo_mat), rownames(pseudo_meta))
+    if(length(common_samples) < 2) next
+    pseudo_mat <- pseudo_mat[, common_samples, drop = FALSE]
+    pseudo_meta <- pseudo_meta[common_samples, , drop = FALSE]
+    n_g1 <- sum(pseudo_meta$status == g1); n_g2 <- sum(pseudo_meta$status == g2)
+    if(n_g1 < 2 | n_g2 < 2) next
+    pseudo_meta$sample <- NULL
+    pseudo_meta$status <- factor(pseudo_meta$status, levels = c(g2, g1))
+    if(nrow(pseudo_mat) == 0 | ncol(pseudo_mat) == 0) next
+    if(sum(pseudo_mat) == 0) next
+    pseudo_mat <- pseudo_mat[rowSums(pseudo_mat) > 0, , drop = FALSE]
+    if(nrow(pseudo_mat) == 0) next
+    dds <- DESeqDataSetFromMatrix(countData = round(pseudo_mat), colData = pseudo_meta, design = ~ status)
+    dds <- DESeq(dds, quiet = TRUE)
+    res <- results(dds, contrast = c("status", g1, g2))
+    res_df <- as.data.frame(res) %>% rownames_to_column("gene") %>%
+      mutate(comparison = nm, celltype = ct)
+    deg_list[[paste0(ct, "_", nm)]] <- res_df
+  }
+}
+deg_df <- bind_rows(deg_list) %>% filter(!is.na(padj))
+saveRDS(deg_sig,file="E:/Cohort PPT/JIA/code/CellPreprocess/0920_degdf.RDS")
+deg_sig <- deg_df %>% filter(abs(log2FoldChange) > 1, padj < 0.01)
+deg_sig$direction <- ifelse(deg_sig$log2FoldChange > 0, "up", "down")
+dim(deg_sig)
+saveRDS(deg_sig,file="E:/Cohort PPT/JIA/code/CellPreprocess/0920_degsig.RDS")
+
+deg_sig<-readRDS("E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\0920_degsig.RDS")
+deg_df<-readRDS("E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\0920_degdf.RDS")
 
 
+###### 2. Summary and gene set intersection
+#####(1) summary
+load("E:\\通路基因集合\\gene4pathway.Rdata")
+IFN28 <- c("DDX60","EPSTI1","HERC5","HERC6","IFI27","IFI44","IFI44L","IFI6","IFIT1","IFIT2","IFIT3","IFIT5","ISG15","LAMP3","LY6E","MX1","OAS1","OAS2","OAS3","OASL","RSAD2","RTP4","SIGLEC1","SPATS2L","USP18","CXCL10","GBP1","SOCS1")
+pyrop<-c("AIM2","APIP","CASP1","CASP4","CASP8","DHX9","ELANE","GSDMA","GSDMB","GSDMC","GSDMD","GSDME","GZMA","GZMB","NAIP","NLRC4","NLRP1","NLRP6","NLRP9","TREM2","ZBP1")#form Spectra
+reactome <- msigdbr(species = "Homo sapiens",category = "C2",subcategory = "CP:REACTOME")
+IL1_genes <- reactome %>%filter(gs_name == "REACTOME_INTERLEUKIN_1_SIGNALING") %>%pull(gene_symbol) %>%unique()
+
+gene_sets <- list(IFN28 = IFN28, IFN2 = IFN2$gene, MAPK = MAPK$gene,
+                  NFKB = NFKB$gene, pyrop = pyrop, IL1 = IL1_genes)
+stat_df <- deg_sig %>% group_by(celltype, comparison, direction) %>%
+  summarise(gene_count = n(), .groups = "drop")
+split_list <- split(deg_sig, paste(deg_sig$celltype, deg_sig$comparison, deg_sig$direction, sep = "_"))
+intersect_res <- lapply(split_list, function(df){
+  out <- lapply(gene_sets, function(s) length(intersect(df$gene, s)))
+  tibble(!!!out, celltype = unique(df$celltype),
+         comparison = unique(df$comparison), direction = unique(df$direction))
+}) %>% bind_rows()
+summary_final <- left_join(stat_df, intersect_res, by = c("celltype","comparison","direction"))
+
+
+#####(2) DEG gene scatters
+plot_manhattan_scatter <- function(deg_sig, celltypes_show,
+                                   n_label = 15,
+                                   bg_color = "gray90",
+                                   bg_size = 0.5,
+                                   pathway_size = 1.5,
+                                   label_stroke = 0.3,
+                                   text_size = 2,
+                                   direction = "up",
+                                   show_nfkb = TRUE, show_mapk = TRUE, show_ifn28 = TRUE,
+                                   show_ifn2 = TRUE, show_pyrop = FALSE, show_il1 = FALSE,
+                                   pathway_colors = c(
+                                     NFKB = "#8C2522", MAPK = "#F49D5C",
+                                     IFN28 = "#6699CC", IFN2 = "#B3D1E7",
+                                     pyrop = "#A992C0", IL1 = "#AF478A"
+                                   )){
+  deg_vol <- deg_sig %>% filter(!is.na(padj), !is.na(log2FoldChange))
+  all_genes <- list(
+    NFKB = NFKB$gene, MAPK = MAPK$gene,
+    IFN28 = IFN28, IFN2 = IFN2$gene,
+    pyrop = pyrop, IL1 = IL1_genes
+  )
+  show_flags <- c(show_nfkb, show_mapk, show_ifn28, show_ifn2, show_pyrop, show_il1)
+  keep_paths <- names(all_genes)[show_flags]
+  col_use <- pathway_colors[keep_paths]
+  man_list <- list()
+  for(comp in c("Mono_vs_HC","Mono_vs_Poly","Poly_vs_HC")){
+    df <- deg_vol %>%
+      filter(comparison == comp, celltype %in% celltypes_show) %>%
+      mutate(pathway = "background")
+    for(pw in keep_paths){
+      df$pathway[df$gene %in% all_genes[[pw]]] <- pw
+    }
+    if(direction == "up") df$pathway[df$pathway != "background" & df$log2FoldChange < 0] <- "background"
+    if(direction == "down") df$pathway[df$pathway != "background" & df$log2FoldChange > 0] <- "background"
+    df_sig <- df %>% filter(pathway != "background")
+    top_genes <- df_sig %>%
+      group_by(pathway) %>%
+      arrange(desc(abs(log2FoldChange)), .by_group = TRUE) %>%
+      slice_head(n = n_label) %>%
+      pull(gene)
+    df$label <- ifelse(df$gene %in% top_genes, df$gene, NA)
+    df$is_labeled <- df$gene %in% top_genes
+    df$celltype <- factor(df$celltype, levels = celltypes_show)
+    df$pathway <- factor(df$pathway, levels = c("background", keep_paths))
+    df_bg <- df %>% filter(pathway == "background")
+    df_path_all <- df %>% filter(pathway != "background", !is_labeled)
+    df_path_label <- df %>% filter(pathway != "background", is_labeled)
+    p <- ggplot() +
+      geom_jitter(data = df_bg, aes(x = celltype, y = log2FoldChange), width = 0.2, size = bg_size, color = bg_color, shape = 19) +
+      geom_jitter(data = df_path_all, aes(x = celltype, y = log2FoldChange, color = pathway), width = 0.2, size = pathway_size, shape = 19) +
+      geom_jitter(data = df_path_label, aes(x = celltype, y = log2FoldChange, fill = pathway), width = 0.2, size = pathway_size, shape = 21, stroke = label_stroke, color = "black") +
+      geom_hline(yintercept = c(-1,1), linetype = "dashed", color = "grey50") +
+      geom_text_repel(data = df_path_label, aes(x = celltype, y = log2FoldChange, label = label, color = pathway), size = text_size, max.overlaps = 30, na.rm = TRUE, show.legend = FALSE) +
+      scale_color_manual(values = col_use) +
+      scale_fill_manual(values = col_use) +
+      coord_cartesian(ylim = c(-10, 10)) +
+      theme_classic() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7, color = "black"),
+            axis.text.y = element_text(size = 7, color = "black"),
+            legend.position = "bottom",
+            plot.title = element_text(hjust = 0.5, face = "bold")) +
+      labs(x = "", y = "log2FoldChange", title = comp)
+    man_list[[comp]] <- p
+  }
+  return(man_list)
+}
+
+celltypes_show <- c("CD14 Monocyte","CD16 Monocyte","pDC","Cytotoxic CD8 T",
+                    "Naive CD8 T","Naive CD4 T","NK","Treg","γδT",
+                    "Memory B","Naive B","Plasma")
+man_list <- plot_manhattan_scatter(deg_sig, celltypes_show, direction = "up")
+man_list$Mono_vs_HC
+man_list$Mono_vs_Poly
+man_list$Poly_vs_HC
+
+
+#####(3) stacked plots
+plot_pathway_stack <- function(summary_final, comp, celltypes_show,
+                               pathway_order = c("NFKB","MAPK","IFN28","IFN2","pyrop","IL1"),
+                               pathway_cols = c(NFKB = "#8C2522", MAPK = "#F49D5C",
+                                                IFN28 = "#6699CC", IFN2 = "#B3D1E7",
+                                                pyrop = "#A992C0", IL1 = "#AF478A")){
+  df <- summary_final %>%
+    filter(comparison == comp, celltype %in% celltypes_show) %>%
+    select(celltype, direction, IFN28, IFN2, MAPK, NFKB, pyrop, IL1) %>%
+    pivot_longer(cols = c(IFN28, IFN2, MAPK, NFKB, pyrop, IL1),
+                 names_to = "pathway", values_to = "count") %>%
+    filter(count > 0) %>%
+    mutate(celltype = factor(celltype, levels = celltypes_show),
+           direction = factor(direction, levels = c("up","down")),
+           pathway = factor(pathway, levels = pathway_order))
+  p <- ggplot(df, aes(x = direction, y = count, fill = pathway)) +
+    geom_col(width = 0.55, color = "white", linewidth = 0.2) +
+    facet_wrap(~ celltype, nrow = 1) +
+    scale_fill_manual(values = pathway_cols) +
+    theme_classic() +
+    theme(axis.text.x = element_text(size = 7, color = "black"),
+          strip.text = element_text(size = 7, angle = 45),
+          legend.position = "bottom",
+          plot.title = element_text(hjust = 0.5, face = "bold")) +
+    labs(x = "", y = "Gene count", title = comp, fill = "Pathway")
+  return(p)
+}
+
+celltypes_show <- c("CD14 Monocyte","CD16 Monocyte","pDC","Cytotoxic CD8 T",
+                    "Naive CD8 T","Naive CD4 T","NK","Treg","γδT",
+                    "Memory B","Naive B","Plasma")
+stack_p1 <- plot_pathway_stack(summary_final, "Mono_vs_HC", celltypes_show)
+stack_p2 <- plot_pathway_stack(summary_final, "Poly_vs_HC", celltypes_show)
+stack_p3 <- plot_pathway_stack(summary_final, "Mono_vs_Poly", celltypes_show)
+
+sta_scatter1 <- (stack_p1+theme(legend.position = "none"))/ (man_list$Mono_vs_HC+theme(plot.title = element_blank())) + plot_layout(heights = c(0.5, 1.2))
+sta_scatter2 <- (stack_p2+theme(legend.position = "none")) / (man_list$Poly_vs_HC+theme(plot.title = element_blank())) + plot_layout(heights = c(0.5, 1.2))
+sta_scatter3 <- (stack_p3+theme(legend.position = "none"))/ (man_list$Mono_vs_Poly+theme(plot.title = element_blank())) + plot_layout(heights = c(0.5, 1.2))
+ggsave(sta_scatter1, file = "E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\scatter_stack1.pdf", width = 7.95, height = 5.86)
+ggsave(sta_scatter2, file = "E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\scatter_stack2.pdf", width = 7.95, height = 5.86)
+ggsave(sta_scatter3, file = "E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\scatter_stack3.pdf", width = 7.95, height = 5.86)
+
+sta_scatter1/sta_scatter2/sta_scatter3->sta
+ggsave(sta, file = "E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\scatter_stack3.pdf", width = 7.95, height = 14.65)
+
+
+#####(5) DEG count heatmap
+plot_pathway_heatmap_grid <- function(deg_sig, celltypes_show,
+                                      comparison_order = c("Mono_vs_HC","Mono_vs_Poly","Poly_vs_HC"),
+                                      pathway_order = c("NFKB","MAPK","IFN28","IFN2","pyrop","IL1"),
+                                      show_nfkb = TRUE, show_mapk = TRUE, show_ifn28 = TRUE,
+                                      show_ifn2 = TRUE, show_pyrop = TRUE, show_il1 = TRUE,
+                                      col_up = "#EC706E", col_down = "#234091",
+                                      tile_w = 1, tile_h = 1){
+  library(tidyverse)
+  library(patchwork)
+  deg_vol <- deg_sig %>% filter(!is.na(padj), !is.na(log2FoldChange))
+  all_genes <- list(NFKB=NFKB$gene, MAPK=MAPK$gene, IFN28=IFN28,
+                    IFN2=IFN2$gene, pyrop=pyrop, IL1=IL1_genes)
+  show_flags <- c(show_nfkb, show_mapk, show_ifn28, show_ifn2, show_pyrop, show_il1)
+  keep_paths <- pathway_order[show_flags]
+  rows <- list()
+  for(ct in celltypes_show){
+    for(comp in comparison_order){
+      sub <- deg_vol %>% filter(celltype == ct, comparison == comp)
+      for(pw in keep_paths){
+        g <- sub %>% filter(gene %in% all_genes[[pw]])
+        n_up <- sum(g$log2FoldChange > 0, na.rm = TRUE)
+        n_dn <- sum(g$log2FoldChange < 0, na.rm = TRUE)
+        rows[[length(rows)+1]] <- data.frame(celltype=ct, comparison=comp, pathway=pw, direction="up", n=n_up)
+        rows[[length(rows)+1]] <- data.frame(celltype=ct, comparison=comp, pathway=pw, direction="down", n=n_dn)
+      }
+    }
+  }
+  df <- do.call(rbind, rows)
+  up_max <- max(df$n[df$direction=="up"])
+  dn_max <- max(df$n[df$direction=="down"])
+  df <- df %>% mutate(
+    val = ifelse(direction=="up", n/up_max, -n/dn_max),
+    xlab = paste0(pathway, ifelse(direction=="up","\u2191","\u2193"))
+  )
+  x_levels <- as.vector(sapply(keep_paths, function(pw) paste0(pw, c("\u2191","\u2193"))))
+  df$xlab <- factor(df$xlab, levels=x_levels)
+  plots <- list()
+  for(i in seq_along(celltypes_show)){
+    ct <- celltypes_show[i]
+    sub <- df %>% filter(celltype == ct)
+    p <- ggplot(sub, aes(x=xlab, y=comparison, fill=val)) +
+      geom_tile(color="white", linewidth=0.6, width=tile_w, height=tile_h) +
+      geom_text(aes(label=n), size=2.4, color="black") +
+      scale_fill_gradient2(low=col_down, mid="white", high=col_up,
+                           midpoint=0, limits=c(-1,1), breaks=c(-1,0,1),
+                           labels=c(paste0(up_max,"\u2193"),"0",paste0(up_max,"\u2191")), name="Gene count") +
+      scale_y_discrete(limits=comparison_order) +
+      labs(y=ct) +
+      theme_classic() +
+      theme(axis.text.x = element_text(size=7, color="black"),#angle=45, hjust=1, 
+            axis.text.y = element_text(size=7, color="black"),
+            axis.title.y = element_text(size=8, color="black"),
+            axis.title.x = element_blank(),
+            legend.position="none",
+            plot.margin = margin(0,0,0,0,"pt"))
+    if(i < length(celltypes_show)){
+      p <- p + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+    }
+    plots[[i]] <- p
+  }
+  combined <- wrap_plots(plots, ncol=1)
+  return(combined)
+}
+
+celltypes_show <- c("CD14 Monocyte","CD16 Monocyte","pDC","Cytotoxic CD8 T",
+                    "Naive CD8 T","Naive CD4 T","NK","Treg","γδT",
+                    "Memory B","Naive B","Plasma")
+p_heat <- plot_pathway_heatmap_grid(deg_sig, celltypes_show,
+                                    col_up = "#D48A47", col_down = "#234091")
+p_heat
+
+
+
+###### 3. GSEA, single cell type, single sample
+library(msigdb)
+library(msigdbr)
+library(clusterProfiler)
+library(Seurat)
+library(dplyr)
+library(tidyr)
+library(clusterProfiler)
+library(msigdbr)
+
+run_gsea_single <- function(obj, celltypes, mutant_samples, hc_samples, poly_samples,
+                            species = "Homo sapiens", pvalueCutoff = 0.2){
+  options(future.globals.maxSize = Inf)
+  future::plan(future::sequential)
+  hallmark <- msigdbr(species = species, category = "H")
+  term2gene <- stack(split(hallmark$gene_symbol, hallmark$gs_name))[, c(2,1)]
+  out <- list()
+  for(ct in celltypes){
+    sub_ct <- subset(obj, subset = celltype == ct)
+    for(mut in mutant_samples){
+      for(ref_grp in list(list(ref = hc_samples, tag = "vs_HC"),
+                          list(ref = poly_samples, tag = "vs_Poly"))){
+        options(future.globals.maxSize = Inf)
+        future::plan(future::sequential)
+        keep_samples <- c(mut, ref_grp$ref)
+        sub <- subset(sub_ct, subset = sample %in% keep_samples)
+        sub$group <- ifelse(sub$sample == mut, "mut", "ref")
+        Idents(sub) <- sub$group
+        markers <- FindMarkers(sub, ident.1 = "mut", ident.2 = "ref",
+                               logfc.threshold = 0, min.pct = 0, verbose = FALSE)
+        markers <- markers %>% tibble::rownames_to_column("gene")
+        if(nrow(markers) < 10) next
+        markers$score <- markers$avg_log2FC * (-log10(markers$p_val_adj + 1e-300))
+        gene_rank <- sort(markers$score, decreasing = TRUE)
+        names(gene_rank) <- markers$gene
+        gsea_obj <- GSEA(geneList = gene_rank, TERM2GENE = term2gene,
+                         pvalueCutoff = pvalueCutoff, verbose = FALSE)
+        if(nrow(gsea_obj@result) == 0) next
+        df_gsea <- as.data.frame(gsea_obj@result)
+        df_gsea$Description <- gsub("HALLMARK_", "", df_gsea$Description)
+        df_gsea$celltype <- ct
+        df_gsea$mutant <- mut
+        df_gsea$comparison <- paste0(mut, ref_grp$tag)
+        out[[length(out)+1]] <- df_gsea
+      }
+    }
+  }
+  res_df <- bind_rows(out)
+  return(res_df)
+}
+
+mutant_samples <- c("182LPIN2","181NOD2","183NOD2","190PSTPIP1","200PSTPIP1")
+hc_samples <- paste0("C", 1:6)
+poly_samples <- paste0("poly", 1:6)
+celltypes_use <- c("CD14 Monocyte","CD16 Monocyte","pDC","Cytotoxic CD8 T")
+celltypes_use2<-c("NK","Plasma","Naive CD4 T","Naive CD8 T")
+
+gsea_res <- run_gsea_single(pbmc1, celltypes_use, mutant_samples, hc_samples, poly_samples)
+gsea_res2 <- run_gsea_single(pbmc1, celltypes_use, mutant_samples, hc_samples, poly_samples)
+
+
+dim(gsea_res)
+head(gsea_res)
+
+openxlsx::write.xlsx(gsea_res,file="E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\0923_GSEA.xlsx")
+openxlsx::write.xlsx(gsea_res2,file="E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\0923_GSEA2.xlsx")
+
+###bubble plot (p.adjust<0.05)
+multiplesheets <- function(fname) {
+  sheets <- readxl::excel_sheets(fname)
+  tibble <- lapply(sheets, function(x) readxl::read_excel(fname, sheet = x))
+  data_frame <- lapply(tibble, as.data.frame)
+  names(data_frame) <- sheets
+  print(data_frame)
+}
+
+### monogenic VS HC
+plot_gsea_bubble <- function(data, fill_palette, pathway_order, pathway_labels, shape_type = 16, point_scale = 1.2){
+  library(ggplot2); library(dplyr)
+  data <- data[data$type == "VSHC", ]
+  data$NES <- as.numeric(data$NES)
+  data$padj <- as.numeric(data$p.adjust)
+  data$neglog10padj <- -log10(data$padj)
+  data$ID <- factor(data$ID, levels = pathway_order, labels = pathway_labels)
+  mutant_order <- c("182LPIN2", "181NOD2", "183NOD2", "200PSTPIP1", "190PSTPIP1")
+  mutant_labels <- c("182LPIN2" = "P9", "181NOD2" = "P13", "183NOD2" = "P14",
+                     "200PSTPIP1" = "P15", "190PSTPIP1" = "P16")
+  data$mutant <- factor(data$mutant, levels = mutant_order, labels = mutant_labels[mutant_order])
+  data <- droplevels(data)
+  base_theme <- theme_bw() +
+    theme(axis.text = element_text(color = "black", size = 8),
+          axis.ticks = element_line(color = "black"),
+          axis.title = element_text(color = "black"),
+          strip.text = element_text(color = "black", size = 9),
+          legend.title = element_text(color = "black", size = 8),
+          legend.text = element_text(color = "black", size = 7),
+          panel.grid.major = element_line(color = "grey90", linewidth = 0.3),
+          panel.grid.minor = element_blank(),
+          panel.border = element_rect(color = "black", linewidth = 0.5))
+  p_col <- ggplot(data, aes(x = ID, y = celltype, size = NES, color = neglog10padj)) +
+    geom_point(shape = shape_type, stroke = 0.5) +
+    scale_color_gradientn(colors = fill_palette) +
+    scale_size_continuous(range = c(2*point_scale, 8*point_scale)) +
+    facet_grid(mutant ~ ., scales = "free_y", space = "free_y") +
+    base_theme +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = "", y = "", size = "NES", color = "-log10(p.adjust)")
+  p_row <- ggplot(data, aes(x = celltype, y = ID, size = NES, color = neglog10padj)) +
+    geom_point(shape = shape_type, stroke = 0.5) +
+    scale_color_gradientn(colors = fill_palette) +
+    scale_size_continuous(range = c(2*point_scale, 8*point_scale)) +
+    facet_grid(. ~ mutant, scales = "free_x", space = "free_x") +
+    base_theme +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = "", y = "", size = "NES", color = "-log10(p.adjust)")
+  return(list(column = p_col, row = p_row))
+}
+pathway_order <- c("HALLMARK_INTERFERON_GAMMA_RESPONSE",
+                   "HALLMARK_INTERFERON_ALPHA_RESPONSE",
+                   "HALLMARK_INFLAMMATORY_RESPONSE",
+                   "HALLMARK_TNFA_SIGNALING_VIA_NFKB",
+                   "HALLMARK_IL6_JAK_STAT3_SIGNALING")
+pathway_labels <- c("Interferon-γ response", "Interferon-α response",
+                    "Inflammatory response", "TNF via NF-κB", "IL6-JAK-STAT3")
+col2<-colorRampPalette(c("#542788", "#F7F7F7", "#D6604D"))(101)
+resu<-multiplesheets("E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\0923_GSEA.xlsx")
+resu$`VS HC and poly`->data
+data[data$type=="VSHC",]->data1
+p <- plot_gsea_bubble(data1, col2, pathway_order, pathway_labels, shape_type = 15, point_scale = 1.2)
+print(p)
+
+
+### monogenic VS polygenic
+data2 <- resu$Polybar
+plot_gsea_bubble <- function(data, fill_palette, pathway_order, pathway_labels,
+                             shape_type = 16, point_scale = 1.2){
+  library(ggplot2); library(dplyr)
+  data$NES <- as.numeric(data$NES)
+  data$padj <- as.numeric(data$p.adjust)
+  data$neglog10padj <- -log10(data$padj)
+  data$ID <- factor(data$ID, levels = pathway_order, labels = pathway_labels)
+  mutant_order <- c("182LPIN2", "181NOD2", "183NOD2", "200PSTPIP1", "190PSTPIP1")
+  mutant_labels <- c("182LPIN2" = "P9", "181NOD2" = "P13", "183NOD2" = "P14",
+                     "200PSTPIP1" = "P15", "190PSTPIP1" = "P16")
+  data$mutant <- factor(data$mutant, levels = mutant_order, labels = mutant_labels[mutant_order])
+  data <- droplevels(data)
+  base_theme <- theme_bw() +
+    theme(axis.text = element_text(color = "black", size = 8),
+          axis.ticks = element_line(color = "black"),
+          axis.title = element_text(color = "black"),
+          strip.text = element_text(color = "black", size = 9),
+          legend.title = element_text(color = "black", size = 8),
+          legend.text = element_text(color = "black", size = 7),
+          panel.grid.major = element_line(color = "grey90", linewidth = 0.3),
+          panel.grid.minor = element_blank(),
+          panel.border = element_rect(color = "black", linewidth = 0.5))
+  p_col <- ggplot(data, aes(x = ID, y = celltype, size = NES, color = neglog10padj)) +
+    geom_point(shape = shape_type, stroke = 0.5) +
+    scale_color_gradientn(colors = fill_palette) +
+    scale_size_continuous(range = c(2*point_scale, 8*point_scale)) +
+    facet_grid(mutant ~ ., scales = "free_y", space = "free_y") +
+    base_theme +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = "", y = "", size = "NES", color = "-log10(p.adjust)")
+  p_row <- ggplot(data, aes(x = celltype, y = ID, size = NES, color = neglog10padj)) +
+    geom_point(shape = shape_type, stroke = 0.5) +
+    scale_color_gradientn(colors = fill_palette) +
+    scale_size_continuous(range = c(2*point_scale, 8*point_scale)) +
+    facet_grid(. ~ mutant, scales = "free_x", space = "free_x") +
+    base_theme +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = "", y = "", size = "NES", color = "-log10(p.adjust)")
+  return(list(column = p_col, row = p_row))
+}
+
+pathway_order <- c("HALLMARK_INTERFERON_GAMMA_RESPONSE",
+                   "HALLMARK_INTERFERON_ALPHA_RESPONSE",
+                   "HALLMARK_INFLAMMATORY_RESPONSE",
+                   "HALLMARK_TNFA_SIGNALING_VIA_NFKB",
+                   "HALLMARK_IL6_JAK_STAT3_SIGNALING")
+pathway_labels <- c("Interferon-γ response", "Interferon-α response",
+                    "Inflammatory response", "TNF via NF-κB", "IL6-JAK-STAT3")
+col2 <- colorRampPalette(c("#542788", "#F7F7F7", "#D6604D"))(101)
+p_poly <- plot_gsea_bubble(data2, col2, pathway_order, pathway_labels,
+                           shape_type = 15, point_scale = 1.2)
+p_poly$column
+p_poly$row
