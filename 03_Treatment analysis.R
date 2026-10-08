@@ -193,47 +193,31 @@ short_names <-
 treat2 <- treat
 colnames(treat2)[class_cols] <- short_names
 
-plot_upset_stage <- function(stage, nintersects = 20,
-                             main_color = "#6699CC", sets_color = "#847AB3") {
-  data1 <- filter(treat2, Stage == stage)
-  bin <- sapply(class_cols, function(i) as.integer(!is.na(data1[[i]]) & data1[[i]] != "unused"))
-  colnames(bin) <- short_names
-  bin <- bin[rowSums(bin) >= 2, , drop = FALSE]
-  cs <- sort(colSums(bin), decreasing = TRUE)
-  set_order <- names(cs[cs > 0])
-  upset(as.data.frame(bin), sets = set_order, nsets = length(set_order), nintersects = nintersects,
-        order.by = "freq",
-        main.bar.color = main_color, sets.bar.color = sets_color,
-        mainbar.y.label = "No. of patients", sets.x.label = "Patients using class")
-}
-
-u1<-plot_upset_stage("Maximum disease activity")
-u2<-plot_upset_stage("Max response")
-
-score_cols<-grep("Disease.Activity.Score",colnames(treat2),value=t)
-score_line <- function(stage, nintersects = 20, line_color = "#AF478A", score_col = score_cols) {
+plot_upset_score_combo <- function(stage, nintersects = 20, main_color = "#6699CC", sets_color = "#847AB3", line_color = "#AF478A", score_col = score_cols) {
   data1 <- filter(treat2, Stage == stage)
   bin <- sapply(class_cols, function(i) as.integer(!is.na(data1[[i]]) & data1[[i]] != "unused"))
   colnames(bin) <- short_names
   keep <- rowSums(bin) >= 2
   bin <- bin[keep, , drop = FALSE]
   score <- as.numeric(data1[[score_col]][keep])
+  cs <- sort(colSums(bin), decreasing = TRUE)
+  set_order <- names(cs[cs > 0])
+  n <- length(set_order)
   combo_list <- list()
-  for (k in 2:length(short_names)) {
-    com <- combn(short_names, k)
-    for (j in seq_len(ncol(com))) {
-      sel <- com[, j]
-      idx <- rowSums(bin[, sel, drop = FALSE]) == k & rowSums(bin[, setdiff(short_names, sel), drop = FALSE]) == 0
-      n <- sum(idx)
-      if (n > 0) combo_list[[length(combo_list) + 1]] <- data.frame(combo = paste(sel, collapse = " & "), n = n, mean_score = mean(score[idx], na.rm = TRUE))
-    }
+  for (code in 1:(2^n - 1)) {
+    bits <- as.integer(intToBits(code))[1:n]
+    sel <- set_order[rev(bits) == 1]
+    k <- length(sel)
+    idx <- rowSums(bin[, sel, drop = FALSE]) == k & rowSums(bin[, setdiff(short_names, sel), drop = FALSE]) == 0
+    f <- sum(idx)
+    if (f > 0) combo_list[[length(combo_list) + 1]] <- data.frame(combo = paste(sel, collapse = " & "), n = f, mean_score = mean(score[idx], na.rm = TRUE))
   }
   combo_df <- do.call(rbind, combo_list)
   combo_df <- combo_df[order(combo_df$n, decreasing = TRUE), ]
   combo_df <- head(combo_df, nintersects)
-  combo_df$combo <- factor(combo_df$combo, levels = combo_df$combo)
+  combo_df$combo <- factor(combo_df$combo, levels = as.character(combo_df$combo))
   ymax <- ceiling(max(combo_df$mean_score, na.rm = TRUE) / 2) * 2
-  ggplot(combo_df, aes(x = combo, y = mean_score, group = 1)) +
+  p_score <- ggplot(combo_df, aes(x = combo, y = mean_score, group = 1)) +
     geom_hline(yintercept = c(3, 7), linetype = "dashed", color = "grey50", linewidth = 0.5) +
     geom_line(color = line_color, linewidth = 0.8) +
     geom_point(color = line_color, size = 2) +
@@ -242,63 +226,20 @@ score_line <- function(stage, nintersects = 20, line_color = "#AF478A", score_co
     labs(x = NULL, y = "Mean score") +
     theme_classic() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 7),
-          axis.text.y = element_text(color = "black", size = 7),
-          axis.ticks = element_line(color = "black"), axis.line = element_line(color = "black"))
+          axis.text.y = element_text(color = "black", size = 7), axis.ticks = element_line(color = "black"), axis.line = element_line(color = "black"))
+  p_upset <- upset(as.data.frame(bin), sets = set_order, nsets = length(set_order), nintersects = nintersects,
+                   order.by = "freq", main.bar.color = main_color, sets.bar.color = sets_color,
+                   mainbar.y.label = "No. of patients", sets.x.label = "Patients using class")
+  list(upset = p_upset, score = p_score, combo_df = combo_df)
 }
-s1 <- score_line("Maximum disease activity")
-s2 <- score_line("Max response")
 
-###only one therapy (no retain)
-# plot_upset_single <- function(stage, nintersects = 20, main_color = "#6699CC", sets_color = "#847AB3") {
-#   data1 <- filter(treat2, Stage == stage)
-#   bin <- sapply(class_cols, function(i) as.integer(!is.na(data1[[i]]) & data1[[i]] != "unused"))
-#   colnames(bin) <- short_names
-#   bin <- bin[rowSums(bin) == 1, , drop = FALSE]
-#   cs <- sort(colSums(bin), decreasing = TRUE)
-#   set_order <- names(cs[cs > 0])
-#   upset(as.data.frame(bin), sets = set_order, nsets = length(set_order), nintersects = nintersects,
-#         order.by = "freq",
-#         main.bar.color = main_color, sets.bar.color = sets_color,
-#         mainbar.y.label = "No. of patients", sets.x.label = "Patients using class")
-# }
-# 
-# score_line_single <- function(stage, nintersects = 20, line_color = "#AF478A", score_col = score_cols) {
-#   data1 <- filter(treat2, Stage == stage)
-#   bin <- sapply(class_cols, function(i) as.integer(!is.na(data1[[i]]) & data1[[i]] != "unused"))
-#   colnames(bin) <- short_names
-#   keep <- rowSums(bin) == 1
-#   bin <- bin[keep, , drop = FALSE]
-#   score <- as.numeric(data1[[score_col]][keep])
-#   combo_list <- list()
-#   for (j in seq_along(short_names)) {
-#     sel <- short_names[j]
-#     idx <- bin[, sel] == 1
-#     n <- sum(idx)
-#     if (n > 0) combo_list[[length(combo_list) + 1]] <- data.frame(combo = sel, n = n, mean_score = mean(score[idx], na.rm = TRUE))
-#   }
-#   combo_df <- do.call(rbind, combo_list)
-#   combo_df <- combo_df[order(combo_df$n, decreasing = TRUE), ]
-#   combo_df <- head(combo_df, nintersects)
-#   combo_df$combo <- factor(combo_df$combo, levels = combo_df$combo)
-#   ymax <- ceiling(max(combo_df$mean_score, na.rm = TRUE) / 2) * 2
-#   ggplot(combo_df, aes(x = combo, y = mean_score, group = 1)) +
-#     geom_hline(yintercept = c(3, 7), linetype = "dashed", color = "grey50", linewidth = 0.5) +
-#     geom_line(color = line_color, linewidth = 0.8) +
-#     geom_point(color = line_color, size = 2) +
-#     geom_text(aes(label = round(mean_score, 2)), vjust = -1, size = 3) +
-#     scale_y_continuous(limits = c(0, ymax), breaks = seq(0, ymax, by = 2), expand = expansion(mult = c(0, 0.05))) +
-#     labs(x = NULL, y = "Mean score") +
-#     theme_classic() +
-#     theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 7),
-#           axis.text.y = element_text(color = "black", size = 7),
-#           axis.ticks = element_line(color = "black"), axis.line = element_line(color = "black"))
-# }
-# 
-# u1s <- plot_upset_single("Maximum disease activity")
-# u2s <- plot_upset_single("Max response")
-# s1s <- score_line_single("Maximum disease activity")
-# s2s <- score_line_single("Max response")
-
+r1 <- plot_upset_score_combo("Maximum disease activity")
+r1$upset
+r1$score
+r1$combo_df
+r2 <- plot_upset_score_combo("Max response")
+r2$upset
+r2$score
 
 #######4 Sangke plots for targeted therapy
 library(dplyr)
@@ -359,3 +300,10 @@ res$drug_pathway_pct
 res$outcome_pathway_pct
 res$outcome_combo_pct
 
+
+res2 <- sankey_drugcol("Max response",
+                       c("Anti-IL-1", "Anti-IL-6", "Anti-TNF", "JAKi"), exclude_unused = TRUE)
+res2$plot
+res2$drug_pathway_pct
+res2$outcome_pathway_pct
+res2$outcome_combo_pct
