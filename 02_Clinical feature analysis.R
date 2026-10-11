@@ -5,11 +5,11 @@ library(tidyverse)
 
 clinidata<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
 grep("ystem",unique(clinidata$Number),value = T)
-unique(as.character(as.matrix(clinidata[13:92,3:ncol(clinidata)])))#92-13+1=80
+unique(as.character(as.matrix(clinidata[13:84,3:ncol(clinidata)])))#87-13+1=75
 
 ######1 system prop
 sysdata<-clinidata[clinidata$Number%in%grep("ystem",unique(clinidata$Number),value = T),]
-dim(sysdata)#80 35
+dim(sysdata)#72 35
 colnames(sysdata)
 exist<-data.frame()
 alle<-data.frame()
@@ -132,7 +132,8 @@ identical(x1,x2)
 as.data.frame(t(data.frame(c("category","pathway",metainfo$pathway))))->y1
 colnames(y1)<-colnames(clinidata)
 clinidata2<-rbind(clinidata,y1)
-rownames(clinidata2)[93]<-93
+dim(clinidata2)
+rownames(clinidata2)[86]<-86 # more 1 than clinical data
 
 Count_prop<-function(sysdata){
   exist<-data.frame()
@@ -167,12 +168,12 @@ Count_prop<-function(sysdata){
   )
   return(pheno_prop)
 }
-pathways<-unique(as.character(as.matrix(clinidata2[93,3:35])))
+pathways<-unique(as.character(as.matrix(clinidata2[86,3:35])))
 
 pathway_sysprop<-data.frame()
 for(i in 1:length(pathways)){
   index1<-pathways[i]
-  grep(index1,clinidata2[93,])->colindex
+  grep(index1,clinidata2[86,])->colindex
   sysdata1<-clinidata2[clinidata2$Number%in%grep("ystem",unique(clinidata2$Number),value = T),
                        c(1,2,colindex)]
   path1prop<-Count_prop(sysdata1)
@@ -182,7 +183,7 @@ for(i in 1:length(pathways)){
 }
 View(pathway_sysprop)
 #####(1) check again for this analysis,  by pathway
-pathway_row <- clinidata2[93, ]
+pathway_row <- clinidata2[86, ]
 pt_cols <- grep("^P\\d+$", colnames(clinidata2), value = TRUE)
 pt_pathway <- setNames(unlist(pathway_row[, pt_cols]), pt_cols)
 pathways <- unique(pt_pathway)
@@ -202,7 +203,8 @@ for(pw in pathways){
   tmp$Percentage <- round(tmp$Positive_n / tmp$Evaluated_n * 100, 2)
   pheno_by_pathway <- rbind(pheno_by_pathway, tmp)
 }
-pheno_by_pathway
+View(pheno_by_pathway)
+identical(pheno_by_pathway$Percentage,pathway_sysprop$Percentage)
 
 write.table(pheno_by_pathway, "E:/Cohort PPT/JIA/code/CellPreprocess/clinical_3d.txt",
             sep = "\t", row.names = FALSE, quote = FALSE)
@@ -215,15 +217,26 @@ top3 <- pheno_by_pathway %>%
   as.data.frame()
 top3
 
+View(top3)
 ##save result
 save(pheno_by_pathway,pheno_prop,file="E://Cohort PPT//JIA//code//Phenotype_prop.Rdata")
 
 
 ######3 feature proportion for each feature
-sysorder<-c("Growth and musculoskeletal system","Systemic Manifestations","Hematologic system","Immune system","Cutaneous-Mucosal system","Digestive system","Hepatosplenic system","Endocrine system","Respiratory system","Nervous system","Cardiovascular system","Urinary system")
+sysorder<-c(pheno_prop%>%arrange(desc(Percentage))%>%pull(System))
+
+sysorder<-c("Growth and musculoskeletal system",
+"Systemic Manifestations","Cutaneous-Mucosal system",
+"Immune system","Digestive system",
+"Hepatosplenic system",
+"Endocrine system",
+"Respiratory system",
+"Nervous system",
+"Hematologic system",
+"Cardiovascular system","Urinary system")
+
 clinidata<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
 grep("ystem",unique(clinidata$Number),value = T)
-unique(as.character(as.matrix(clinidata[13:92,3:ncol(clinidata)])))#92-13+1=80
 sysdata<-clinidata[clinidata$Number%in%grep("ystem",unique(clinidata$Number),value = T),]
 dim(sysdata)#79 35
 colnames(sysdata)
@@ -240,8 +253,8 @@ colnames(features_prop)<-c("sys","fea","ratio")
 features_prop$ratio<-round(as.numeric(features_prop$ratio),2)
 
 as.numeric(which(apply(sysdata,1,function(x){sum(x[3:length(x)]=="yes")})==0))->index
-sysdata$Number_ID[index]#26 
-dim(features_prop[features_prop$ratio==0,])#26 
+sysdata$Number_ID[index]#25
+dim(features_prop[features_prop$ratio==0,])#25
 
 features_prop$fea <- trimws(features_prop$fea)
 features_prop$fea <- gsub("’", "'", features_prop$fea)
@@ -273,9 +286,9 @@ grep("/", features_prop$fea, value = TRUE)
 clinidata<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
 metainfo<-read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
 grep("ystem",unique(clinidata$Number),value = T)
-unique(as.character(as.matrix(clinidata[13:92,3:ncol(clinidata)])))#92-13+1=80
+unique(as.character(as.matrix(clinidata[13:84,3:ncol(clinidata)])))#92-13+1=80
 sysdata<-clinidata[clinidata$Number%in%grep("ystem",unique(clinidata$Number),value = T),]
-dim(sysdata)#80 35
+dim(sysdata)#72 35
 
 gene <- c("ADA2","LACC1","ELF4","XIAP","MVK","LPIN2","NLRP3","NOD2",
                 "PSTPIP1","RAC2","COPA","UNC93B1","SOCS1","TNFAIP3")
@@ -366,8 +379,7 @@ plot_pheno_heatmap <- function(syslist, metainfo, sysdata,
         if(length(g$widths) > 2) g$widths[2:(length(g$widths)-1)] <- unit(0.05, "cm")
         for(k in seq_along(g$grobs)){
           if(inherits(g$grobs[[k]], "rect")){
-            g$grobs[[k]]$width <- unit(0.4, "cm")
-            g$grobs[[k]]$height <- unit(0.4, "cm")
+            g$grobs[[k]]$width <- unit(0.4, "cm"); g$grobs[[k]]$height <- unit(0.4, "cm")
           }
         }
       }
@@ -388,42 +400,47 @@ plot_pheno_heatmap <- function(syslist, metainfo, sysdata,
                                  gaps_col = gaps_col, main = NA), common))
   p1 <- remove_anno_border(p1); p2 <- remove_anno_border(p2); p3 <- remove_anno_border(p3)
   p1 <- shrink_legend(p1); p2 <- shrink_legend(p2); p3 <- shrink_legend(p3)
-  sys_long <- as.data.frame(mat) %>% tibble::rownames_to_column("gene") %>%
-    pivot_longer(-gene, names_to = "Number_ID", values_to = "result") %>%
-    filter(result == 1) %>%
-    left_join(rownames_to_column(col_anno, "Number_ID"), by = "Number_ID")
-  stack_dat <- sys_long %>% count(gene, Number) %>%
-    group_by(gene) %>% mutate(total = sum(n), prop = n/total) %>% ungroup()
-  stack_dat <- stack_dat %>% group_by(gene) %>%
-    mutate(rk = rank(-prop, ties.method = "first")) %>% ungroup()
-  stack_dat$gene <- factor(stack_dat$gene, levels = rownames(mat))
-  stack_dat$Number <- factor(stack_dat$Number, levels = sys_order)
-  p_stack <- ggplot(stack_dat, aes(x = prop, y = gene, fill = Number)) +
-    geom_col(width = 0.9, color = "white", linewidth = 0.3) +
-    geom_text(aes(label = ifelse(rk <= 3, round(prop*100, 2), "")),
-              position = position_stack(vjust = 0.5), color = "black", size = 1.5) +
-    scale_fill_manual(values = ann_colors$Number) +
-    scale_x_continuous(expand = c(0,0), labels = scales::percent) +
-    scale_y_discrete(expand = c(0,0)) +
-    labs(x = "Proportion") +
-    theme_classic() +
-    theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
-          axis.line.y = element_blank(), axis.title.y = element_blank(),
-          axis.text.x = element_text(size = 7, color = "black"),
-          axis.title.x = element_text(size = 8, color = "black"),
-          legend.position = "none", plot.margin = margin(0,0,0,0))
+  prop_table <- syslist %>% filter(result == 1) %>%
+    count(gene, Number, name = "n") %>%
+    group_by(gene) %>% mutate(total = sum(n), prop = n/total) %>% ungroup() %>%
+    arrange(gene, factor(Number, levels = sys_order)) %>%
+    group_by(gene) %>% mutate(rk = row_number()) %>% ungroup()
+  gene_order <- rownames(mat)
+  prop_table$gene <- factor(prop_table$gene, levels = rev(gene_order))
+  mk_stack <- function(show_y = FALSE, show_legend = FALSE){
+    ggplot(prop_table, aes(x = prop, y = gene, fill = Number)) +
+      geom_col(width = 0.9, color = "white", linewidth = 0.3) +
+      geom_text(aes(label = ifelse(rk <= 3, round(prop*100, 2), "")),
+                position = position_stack(vjust = 0.5), color = "black", size = 1.5) +
+      scale_fill_manual(values = ann_colors$Number, drop = FALSE) +
+      scale_x_continuous(expand = c(0,0), labels = scales::percent) +
+      labs(x = "Proportion", y = NULL) +
+      theme_classic() +
+      theme(axis.text.y = if(show_y) element_text(size = 9, color = "black") else element_blank(),
+            axis.ticks.y = element_blank(), axis.line.y = element_blank(),
+            axis.text.x = element_text(size = 7, color = "black"),
+            axis.title.x = element_text(size = 8, color = "black"),
+            legend.position = if(show_legend) "right" else "none",
+            plot.margin = margin(0,0,0,0))
+  }
+  p_stack <- mk_stack(FALSE, FALSE)
+  p_stack_standalone <- mk_stack(TRUE, TRUE)
   gt <- p2$gtable
   mat_pos <- gt$layout[grep("matrix", gt$layout$name)[1], ]
   gt <- gtable_add_cols(gt, unit(3, "cm"), pos = mat_pos$r)
   gt <- gtable_add_grob(gt, ggplotGrob(p_stack), t = mat_pos$t, b = mat_pos$b,
                         l = mat_pos$r + 1, r = mat_pos$r + 1, name = "stack")
   p2$gtable <- gt
-  return(list(cluster_col = p1, block = p2, cluster_row = p3, prop_table = stack_dat))
+  return(list(cluster_col = p1, block = p2, cluster_row = p3,
+              stack_plot = p_stack_standalone, prop_table = prop_table))
 }
-sys_order <- c("Growth and musculoskeletal system","Systemic Manifestations","Immune system",
-               "Cutaneous-Mucosal system","Digestive system","Hepatosplenic system",
-               "Endocrine system","Hematologic system","Respiratory system",
-               "Nervous system","Cardiovascular system","Urinary system")
+
+sys_order <- c("Growth and musculoskeletal system",
+               "Systemic Manifestations","Cutaneous-Mucosal system",
+               "Immune system","Digestive system",
+               "Hepatosplenic system","Endocrine system",
+               "Respiratory system","Nervous system",
+               "Hematologic system","Cardiovascular system","Urinary system")
 pw_order <- c("NFKB","Inflammasome","Uncategoried","Immune metabolism","Cell death","Interferon")
 ann_colors <- list(
   pathway = c("Interferon"="#EC706E","NFKB"="#B3D1E7","Inflammasome"="#6699CC",
@@ -432,26 +449,22 @@ ann_colors <- list(
   exp = c("Balanced"="#7E75AB","Myeloid"="#82C0AE"),
   mechanism = c("deficiency"="#007ABA","gain-of-function"="#EC706E",
                 "haploinsufficiency"="#F1BAAB","NA"="grey80"),
-  Number = c("Growth and musculoskeletal system"="#FEC260",
+  Number = c("Growth and musculoskeletal system"="#B5BBE3",
              "Systemic Manifestations"="#0B71AB",
-             "Immune system"="#847AB3",
              "Cutaneous-Mucosal system"="#EC706E",
+             "Immune system"="#847AB3",
              "Digestive system"="#86C7B4",
              "Hepatosplenic system"="#F1BAAB",
              "Endocrine system"="#D9C2D9",
-             "Hematologic system"="#9CD2ED",
              "Respiratory system"="#FFEFC1",
-             "Nervous system"="#7F7FD5",
+             "Nervous system"="#FEC260",
+             "Hematologic system"="#9CD2ED",
              "Cardiovascular system"="#AF478A",
              "Urinary system"="#CBDAA9"))
 res <- plot_pheno_heatmap(syslist, metainfo, sysdata, sys_order, pw_order, ann_colors,
                           color_present = "#BB0021", color_absent = "gray90",
-                          color_na = "grey80", border_color = "white",
+                          color_na = "grey45", border_color = "white",
                           cellheight = 12, cellwidth = 12)
-#res$cluster_col
 res$block
-#res$cluster_row
-#res$prop_table
-library(ggplotify)
-heat1<-as.ggplot(res$block)
-heat1
+res$stack_plot
+View(res$prop_table)
