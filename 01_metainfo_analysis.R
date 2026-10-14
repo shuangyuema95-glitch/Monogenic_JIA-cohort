@@ -12,7 +12,7 @@ country_colors <- c(
   "Egypt"  = "#B5BBE3",
   "Brazil" = "#CBDAA9")
 p_country <- ggplot(country_df, aes(x = "", y = n, fill = country)) +
-  geom_bar(stat = "identity", width = 1, color = "white", linewidth = 0.5) +
+  geom_bar(stat = "identity", width = 1, linewidth = 0.5) +
   coord_polar("y", start = 0) +
   geom_text(aes(label = paste0(round(percent,1),"%")), 
             position = position_stack(vjust = 0.5), 
@@ -32,10 +32,12 @@ print(p_country)
 sex_ration<-metainfo$sex
 sex_df<-data.frame(sex=sex_ration)|>count(sex,name="n")|>mutate(group=case_when(sex=="f"~"Female",sex=="m"~"Male"),percent=n/sum(n)*100)
 sex_col<-c("Male"="#6699CC","Female"="#86C7B4")
-p_sex<-ggplot(sex_df,aes(x="",y=n,fill=group))+geom_bar(stat="identity",width=1,color="white",linewidth=0.5)+coord_polar("y",start=0)+geom_text(aes(label=paste0(round(percent,1),"%")),position=position_stack(vjust=0.5),colour="black",size=4.2)+scale_fill_manual(values=sex_col)+theme_void()+theme(legend.title=element_blank(),legend.text=element_text(size=11,colour="black"),plot.title=element_text(hjust=0.5,size=14,colour="black"))
+p_sex<-ggplot(sex_df,aes(x="",y=n,fill=group))+geom_bar(stat="identity",width=1,linewidth=0.5)+coord_polar("y",start=0)+geom_text(aes(label=paste0(round(percent,1),"%")),position=position_stack(vjust=0.5),colour="black",size=4.2)+scale_fill_manual(values=sex_col)+theme_void()+theme(legend.title=element_blank(),legend.text=element_text(size=11,colour="black"),plot.title=element_text(hjust=0.5,size=14,colour="black"))
 print(p_sex)
 
-
+table(sex_ration)
+#Female-to-male ratio
+15/18
 
 ######sup  pathway prop pie
 pathway_col<-c(
@@ -49,7 +51,7 @@ pathway_col<-c(
 
 pathway_df <- metainfo %>% count(pathway, name = "n") %>% mutate(percent = n / sum(n) * 100) %>% arrange(desc(percent))
 pathway_df$pathway<-factor(pathway_df$pathway,levels = pathway_df$pathway)
-p_pathway<-ggplot(pathway_df,aes(x="",y=n,fill=pathway))+geom_bar(stat="identity",width=1,color="white",linewidth=0.5)+coord_polar("y",start=0)+geom_text(aes(label=paste0(round(percent,1),"%")),position=position_stack(vjust=0.5),colour="black",size=4.2)+scale_fill_manual(values=pathway_col)+theme_void()+theme(legend.title=element_blank(),legend.text=element_text(size=11,colour="black"),plot.title=element_text(hjust=0.5,size=14,colour="black"))
+p_pathway<-ggplot(pathway_df,aes(x="",y=n,fill=pathway))+geom_bar(stat="identity",width=1,linewidth=0.5)+coord_polar("y",start=0)+geom_text(aes(label=paste0(round(percent,1),"%")),position=position_stack(vjust=0.5),colour="black",size=4.2)+scale_fill_manual(values=pathway_col)+theme_void()+theme(legend.title=element_blank(),legend.text=element_text(size=11,colour="black"),plot.title=element_text(hjust=0.5,size=14,colour="black"))
 
 library(patchwork)
 p_country|p_sex|p_pathway
@@ -241,10 +243,89 @@ calc_age_stats <- function() {
 age_stats <- calc_age_stats()
 print(age_stats)
 
+####forest and IQR age ， foreset plot
+plot_age_forest_both <- function(onset_color, diag_color, point_size=3.5, line_width=0.6, vline_width=0.4) {
+  library(openxlsx); library(ggplot2); library(dplyr); library(patchwork)
+  metainfo <- read.xlsx("0903_Clean case.xlsx")
+  metainfo$ID <- trimws(metainfo$ID); metainfo$gene <- toupper(trimws(metainfo$gene))
+  metainfo$mechanism <- tolower(trimws(metainfo$mechanism))
+  metainfo$mechanism[is.na(metainfo$mechanism)|metainfo$mechanism==""] <- "na"
+  clin <- read.xlsx("code\\Clinical data.xlsx", colNames=FALSE)
+  pids <- trimws(as.character(clin[1, 3:ncol(clin)]))
+  extr <- function(x) { x <- trimws(as.character(x)); x[grepl("not available|^$|^na$",x,ignore.case=TRUE)] <- NA; as.numeric(gsub("[^0-9.]","",x)) }
+  age_df <- data.frame(ID=pids, onset=extr(clin[grep("onset",clin[,1],ignore.case=TRUE)[1], 3:ncol(clin)]), diag=extr(clin[grep("diagnosis",clin[,1],ignore.case=TRUE)[1], 3:ncol(clin)]), stringsAsFactors=FALSE)
+  df <- merge(metainfo[,c("ID","gene","mechanism")], age_df, by="ID", all.x=TRUE)
+  df <- df[df$mechanism != "na" & !is.na(df$onset), ]
+  mech_list <- c("Deficiency"="deficiency","Gain-of-function"="gain-of-function","Haploinsufficiency"="haploinsufficiency")
+  stats_list <- list(); delay_list <- list()
+  for (i in seq_along(mech_list)) {
+    mn <- names(mech_list)[i]; sub <- df[df$mechanism == mech_list[[i]], ]
+    stats_list[[length(stats_list)+1]] <- data.frame(mechanism=mn, type="Onset", median=round(median(sub$onset,na.rm=TRUE),2), q25=round(as.numeric(quantile(sub$onset,0.25,na.rm=TRUE)),2), q75=round(as.numeric(quantile(sub$onset,0.75,na.rm=TRUE)),2), n=nrow(sub))
+    stats_list[[length(stats_list)+1]] <- data.frame(mechanism=mn, type="Diagnosis", median=round(median(sub$diag,na.rm=TRUE),2), q25=round(as.numeric(quantile(sub$diag,0.25,na.rm=TRUE)),2), q75=round(as.numeric(quantile(sub$diag,0.75,na.rm=TRUE)),2), n=nrow(sub))
+    delay_list[[length(delay_list)+1]] <- data.frame(mechanism=mn, n=nrow(sub), onset_median=round(median(sub$onset,na.rm=TRUE),2), diag_median=round(median(sub$diag,na.rm=TRUE),2), delay_median=round(median(sub$diag,na.rm=TRUE)-median(sub$onset,na.rm=TRUE),2))
+  }
+  stats_df <- do.call(rbind, stats_list)
+  delay_df <- do.call(rbind, delay_list)
+  stats_df$type <- factor(stats_df$type, levels=c("Onset","Diagnosis"))
+  stats_df$mechanism <- factor(stats_df$mechanism, levels=c("Deficiency","Gain-of-function","Haploinsufficiency"))
+  base <- ggplot(stats_df, aes(x=median, y=type, color=type)) +
+    geom_vline(aes(xintercept=median), linetype="dashed", color="gray90", linewidth=vline_width) +
+    geom_errorbarh(aes(xmin=q25, xmax=q75, height=0.25), linewidth=line_width) +
+    geom_point(size=point_size) +
+    geom_text(aes(label=paste0(sprintf("%.2f", median), " (n=", n, ")")), hjust=-0.3, vjust=0.5, size=2.8, color="black") +
+    scale_color_manual(values=c("Onset"=onset_color, "Diagnosis"=diag_color)) +
+    scale_x_continuous(expand=expansion(mult=c(0.1,0.25))) +
+    labs(x="Age (years)", y=NULL, color=NULL) +
+    theme_classic() +
+    theme(
+      panel.border = element_rect(color="black", fill=NA, linewidth=0.5),
+      axis.line = element_blank(),
+      axis.text = element_text(color="black", size=9),
+      axis.title = element_text(color="black", size=10),
+      strip.text = element_text(size=10, face="plain"),
+      strip.background = element_rect(color="black", linewidth=0.5),
+      legend.position = "bottom",
+      legend.key.size = unit(0.35,"cm"),
+      plot.margin = margin(8,8,8,8)
+    )
+  p_v <- base + facet_grid(mechanism ~ ., scales="free_y", space="free_y")
+  p_h <- base + facet_grid(. ~ mechanism, scales="free_x")
+  list(vertical=p_v, horizontal=p_h, stats=stats_df, delay=delay_df)
+}
+
+res <- plot_age_forest_both(onset_color="#6699CC", diag_color="#D8A0C0")
+res$vertical
+res$horizontal
+res$stats
+res$delay
+
+####check the proportion of patients with diagnosed age larger than onset
+calc_delay_ratio <- function() {
+  library(openxlsx); library(dplyr)
+  metainfo <- read.xlsx("0903_Clean case.xlsx")
+  metainfo$ID <- trimws(metainfo$ID); metainfo$gene <- toupper(trimws(metainfo$gene))
+  metainfo$mechanism <- tolower(trimws(metainfo$mechanism))
+  metainfo$mechanism[is.na(metainfo$mechanism)|metainfo$mechanism==""] <- "na"
+  clin <- read.xlsx("code\\Clinical data.xlsx", colNames=FALSE)
+  pids <- trimws(as.character(clin[1, 3:ncol(clin)]))
+  extr <- function(x) { x <- trimws(as.character(x)); x[grepl("not available|^$|^na$",x,ignore.case=TRUE)] <- NA; as.numeric(gsub("[^0-9.]","",x)) }
+  age_df <- data.frame(ID=pids, onset=extr(clin[grep("onset",clin[,1],ignore.case=TRUE)[1], 3:ncol(clin)]), diag=extr(clin[grep("diagnosis",clin[,1],ignore.case=TRUE)[1], 3:ncol(clin)]), stringsAsFactors=FALSE)
+  df <- merge(metainfo[,c("ID","gene","mechanism")], age_df, by="ID", all.x=TRUE)
+  df <- df[df$mechanism != "na" & !is.na(df$onset) & !is.na(df$diag), ]
+  mech_list <- c("Deficiency"="deficiency","Gain-of-function"="gain-of-function","Haploinsufficiency"="haploinsufficiency")
+  do.call(rbind, lapply(seq_along(mech_list), function(i) {
+    mn <- names(mech_list)[i]; sub <- df[df$mechanism == mech_list[[i]], ]
+    n_total <- nrow(sub)
+    n_delayed <- sum(sub$diag > sub$onset, na.rm=TRUE)
+    data.frame(mechanism=mn, n_total=n_total, n_diag_gt_onset=n_delayed, pct_diag_gt_onset=round(n_delayed/n_total*100,2), stringsAsFactors=FALSE)
+  }))
+}
+
+delay_ratio <- calc_delay_ratio()
+print(delay_ratio)
 
 
-
--####(2) density plots
+#####(2) density plots
 distri_age_sex <- function(male_col = "#0072B2", female_col = "#AF478A",
                            med_male_col = "#003D81", med_female_col = "#8C2522",
                            med_overall_col = "#333333", med_lwd = 0.7,
@@ -337,6 +418,9 @@ age_density3plots
 ###### Function
 library(openxlsx); library(ggplot2); library(dplyr); library(patchwork)
 genemeta <- read.xlsx("C:/Users/Administrator/Desktop/15个基因已发表突变中是JIA 表型的搜集/score_meta.xlsx")
+f <- c("Autosomal recessive" = "#6699CC",
+                  "autosomal dominant" = "#FEC260",
+                  "X-linked recessive" = "#AF478A")
 
 plot_gene_bar <- function(genemeta,
                           inher_colors = c(f)){
