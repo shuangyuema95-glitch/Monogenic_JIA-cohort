@@ -40,10 +40,10 @@ print(p_sex)
 ######sup  pathway prop pie
 pathway_col<-c(
   "NFKB"="#B3D1E7",
-  "Inflammasome"="#0B71AB",
-  "Immune metabolism"="#A992C0",
-  "Interferon"="#C8BBD5",
-  "Cell death"="#5C6BC0",
+  "Inflammasome"="#6699CC",
+  "Immune metabolism"="#847AB3",
+  "Interferon"="#EC706E",
+  "Cell death"="#FEC260",
   "Uncategoried"="#EBB1A4")
 
 
@@ -137,6 +137,7 @@ table(ACMG_class1)/sum(table(ACMG_class1))
 
 
 ######4 age plot
+setwd("E:\\Cohort PPT\\JIA")
 library(openxlsx)
 clinicalinfo<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
 metainfo<-read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
@@ -211,6 +212,36 @@ my_colors <- c("#0B71AB","#6699CC","#B3D1E7","#5C6BC0","#A992C0","#C8BBD5",
                "#FFEFC1","#FEC260","#F49D5C","#C95968","#EBB1A4","#8C2522",
                "#96AF95","#008280")
 distri_age(gene_colors = my_colors, abline_lwd = 0.5, point_size = 3, text_size = 2.8)
+
+
+####median and IQR age for three groups
+calc_age_stats <- function() {
+  library(openxlsx); library(dplyr)
+  metainfo <- read.xlsx("0903_Clean case.xlsx")
+  metainfo$ID <- trimws(metainfo$ID); metainfo$gene <- toupper(trimws(metainfo$gene))
+  metainfo$mechanism <- tolower(trimws(metainfo$mechanism))
+  metainfo$mechanism[is.na(metainfo$mechanism)|metainfo$mechanism==""] <- "na"
+  clin <- read.xlsx("code\\Clinical data.xlsx", colNames=FALSE)
+  pids <- trimws(as.character(clin[1, 3:ncol(clin)]))
+  extr <- function(x) { x <- trimws(as.character(x)); x[grepl("not available|^$|^na$",x,ignore.case=TRUE)] <- NA; as.numeric(gsub("[^0-9.]","",x)) }
+  age_df <- data.frame(ID=pids, onset=extr(clin[grep("onset",clin[,1],ignore.case=TRUE)[1], 3:ncol(clin)]), diag=extr(clin[grep("diagnosis",clin[,1],ignore.case=TRUE)[1], 3:ncol(clin)]), stringsAsFactors=FALSE)
+  df <- merge(metainfo[,c("ID","gene","mechanism")], age_df, by="ID", all.x=TRUE)
+  df <- df[df$mechanism != "na" & !is.na(df$onset), ]
+  mech_list <- c("Deficiency"="deficiency","Gain-of-function"="gain-of-function","Haploinsufficiency"="haploinsufficiency")
+  do.call(rbind, lapply(seq_along(mech_list), function(i) {
+    sub <- df[df$mechanism == mech_list[[i]], ]
+    data.frame(mechanism=names(mech_list)[i], n=nrow(sub),
+               onset_median=round(median(sub$onset,na.rm=TRUE),1),
+               onset_IQR=paste0(round(quantile(sub$onset,0.25,na.rm=TRUE),1),"-",round(quantile(sub$onset,0.75,na.rm=TRUE),1)),
+               diag_median=round(median(sub$diag,na.rm=TRUE),1),
+               diag_IQR=paste0(round(quantile(sub$diag,0.25,na.rm=TRUE),1),"-",round(quantile(sub$diag,0.75,na.rm=TRUE),1)),
+               stringsAsFactors=FALSE)
+  }))
+}
+age_stats <- calc_age_stats()
+print(age_stats)
+
+
 
 
 -####(2) density plots
@@ -308,9 +339,7 @@ library(openxlsx); library(ggplot2); library(dplyr); library(patchwork)
 genemeta <- read.xlsx("C:/Users/Administrator/Desktop/15个基因已发表突变中是JIA 表型的搜集/score_meta.xlsx")
 
 plot_gene_bar <- function(genemeta,
-                          inher_colors = c("autosomal dominant"="#FEC260",
-                                           "Autosomal recessive"="#6699CC",
-                                           "X-linked recessive"="#AF478A")){
+                          inher_colors = c(f)){
   library(ggplot2); library(dplyr)
   genemeta <- genemeta[!genemeta$Domain %in% c("\\","NA","") & !is.na(genemeta$Domain), ]
   gene_n <- genemeta %>% count(Gene, name = "n")
