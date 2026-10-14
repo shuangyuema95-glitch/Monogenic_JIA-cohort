@@ -1,9 +1,9 @@
 library(openxlsx)
 library(dplyr)
+#labo <- read.xlsx("E:\\Cohort PPT\\JIA\\code\\Labo.xlsx", sheetIndex = 1, header = FALSE)
 
 ######1 proportion for each laboratory testing
 labo <- read.xlsx("E:\\Cohort PPT\\JIA\\code\\Labo.xlsx", colNames = FALSE)
-labo <- read.xlsx("E:\\Cohort PPT\\JIA\\code\\Labo.xlsx", sheetIndex = 1, header = FALSE)
 ind <- as.character(unlist(labo[2, ]))
 colnames(labo) <- trimws(sub("\\(.*", "", ind))
 labo <- labo[-(1:2), ]
@@ -25,7 +25,7 @@ lab_ref <- list(
   "Immune function" = list("NK cell activity" = c(47.6, 76.8), "CD4/CD8" = c(0.9, 2.0)),
   "Renal function" = list("Urine PCR" = c(0, 30), "Serum creatinine" = c(100, 110)))
 
-labo_prop <- function(labo, lab_ref, stages = NULL, digits = 1) {
+labo_prop <- function(labo, lab_ref, stages = NULL, digits = 2) {
   cls <- names(lab_ref)
   ref_num <- bind_rows(lapply(cls, function(cl) {
     if (!is.list(lab_ref[[cl]])) return(NULL)
@@ -97,11 +97,11 @@ plot_lab_stack <- function(res, stage, colors = c(
   bar_width = 0.87) {
   d <- res %>% filter(stage == !!stage)
   long <- bind_rows(
-    d %>% filter(type == "numeric") %>% transmute(ind, class, n, segment = "low", pct = round(100 * low / n, 1)),
-    d %>% filter(type == "numeric") %>% transmute(ind, class, n, segment = "normal", pct = round(100 * normal / n, 1)),
-    d %>% filter(type == "numeric") %>% transmute(ind, class, n, segment = "high", pct = round(100 * high / n, 1)),
-    d %>% filter(type == "binary") %>% transmute(ind, class, n, segment = "negative", pct = round(100 * neg / n, 1)),
-    d %>% filter(type == "binary") %>% transmute(ind, class, n, segment = "positive", pct = round(100 * pos / n, 1))
+    d %>% filter(type == "numeric") %>% transmute(ind, class, n, segment = "low", pct = round(100 * low / n, 2)),
+    d %>% filter(type == "numeric") %>% transmute(ind, class, n, segment = "normal", pct = round(100 * normal / n, 2)),
+    d %>% filter(type == "numeric") %>% transmute(ind, class, n, segment = "high", pct = round(100 * high / n, 2)),
+    d %>% filter(type == "binary") %>% transmute(ind, class, n, segment = "negative", pct = round(100 * neg / n, 2)),
+    d %>% filter(type == "binary") %>% transmute(ind, class, n, segment = "positive", pct = round(100 * pos / n, 2))
   )
   long <- long %>% filter(!is.na(pct) & pct > 0)
   long$segment <- factor(long$segment, levels = c("negative", "low", "normal", "high", "positive"))
