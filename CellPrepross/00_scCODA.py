@@ -44,22 +44,24 @@ def run_scCODA_contrast(
 
     data_all = dat.from_pandas(cell_counts, covariate_columns=["sample"])
 
-    hc_samples = {"C1", "C2", "C3", "C4", "C5", "C6"}
-    poly_samples = {"poly1", "poly2", "poly3", "poly4", "poly5", "poly6"}
-    mono_samples = {"182LPIN2", "181NOD2", "183NOD2", "200PSTPIP1", "190PSTPIP1"}
-
     def map_broad(s):
-        if s in hc_samples:
-            return "HC"
-        elif s in poly_samples:
-            return "polygenic"
-        elif s in mono_samples:
-            return "monogenic"
+        if s in {"C1", "C2", "C3", "C4", "C5", "C6"}:
+            return "Healthy controls"
+        elif s in {"poly1", "poly2", "poly3", "poly4", "poly5", "poly6"}:
+            return "Polygenic JIA"
+        elif s in {"181NOD2", "183NOD2"}:
+            return "NFKB"
+        elif s in {"182LPIN2", "190PSTPIP1", "200PSTPIP1"}:
+            return "Inflammasome"
+        elif s in {"157LACC1"}:
+            return "Immune metabolism"
         else:
             return np.nan
 
     data_all.obs["broad_group"] = data_all.obs["sample"].apply(map_broad)
     data_all = data_all[~data_all.obs["broad_group"].isna()].copy()
+    print("Group sizes:")
+    print(data_all.obs["broad_group"].value_counts())
 
     all_res = []
     for group in target_groups:
@@ -93,27 +95,27 @@ def run_scCODA_contrast(
     print(f"\nDone! Output file: {output_csv}")
     return final_df
 
-
-# 1) polygenic VS HC
-res1 = run_scCODA_contrast(
+# 0) Polygenic VS Healthy controls
+res0 = run_scCODA_contrast(
     csv_path="resultCount.csv",
-    ref_group_label="HC",
-    target_groups=["polygenic"],
+    ref_group_label="Healthy controls",
+    target_groups=["Polygenic JIA"],
     output_csv="scCODA_poly_vs_HC.csv"
 )
 
-# 2) monogenic VS HC
-res2 = run_scCODA_contrast(
+# 1) three pathways VS Healthy controls
+res1 = run_scCODA_contrast(
     csv_path="resultCount.csv",
-    ref_group_label="HC",
-    target_groups=["monogenic"],
-    output_csv="scCODA_mono_vs_HC.csv"
+    ref_group_label="Healthy controls",
+    target_groups=["NFKB", "Inflammasome", "Immune metabolism"],
+    output_csv="scCODA_pathway_vs_HC.csv"
 )
 
-# 3) monogenic VS polygenic
-res3 = run_scCODA_contrast(
+# 2) three pathways VS Polygenic JIA
+res2 = run_scCODA_contrast(
     csv_path="resultCount.csv",
-    ref_group_label="polygenic",
-    target_groups=["monogenic"],
-    output_csv="scCODA_mono_vs_poly.csv"
+    ref_group_label="Polygenic JIA",
+    target_groups=["NFKB", "Inflammasome", "Immune metabolism"],
+    output_csv="scCODA_pathway_vs_poly.csv"
 )
+
