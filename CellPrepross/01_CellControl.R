@@ -6,13 +6,16 @@ library(ggplot2)
 library(DoubletFinder)
 library(patchwork)
 library(cowplot)
+library(openxlsx)
 
 setwd("E:/Cohort PPT/JIA/code")
-samples=c("C1","C2","C3","C4","C5","C6","182LPIN2","181NOD2","183NOD2","190PSTPIP1","200PSTPIP1")
+
+samples=c("C1","C2","C3","C4","C5","C6","poly1","poly2","poly3","poly4","poly5","poly6","157LACC1","182LPIN2","181NOD2","183NOD2","190PSTPIP1","200PSTPIP1")
+gene_variants<-c(rep("none gene",12),c("LACC1_S366*/N19Kfs*31","LPIN2_I67R/K781Tfs*7","NOD2_M513K","NOD2_C495Y","PSTPIP1_E250K","PSTPIP1_E250K"))
+length(samples)==length(gene_variants)
 fold2="E:/Cohort PPT/JIA/code"
 
 
-samples<-c("poly1","poly2","poly3","poly4","poly5","poly6")
 #####1 ----preprocessing-----
 sce <- list()
 summary_df <- data.frame()
@@ -29,6 +32,7 @@ for(i in 1:length(samples)) {
                 nFeature_RNA > 500 & nFeature_RNA < 8000 &
                 percent.mt < 20 &
                 log10GenesPerUMI > 0.7)
+  n_qc <- ncol(s)
   
   all.genes <- rownames(s)
   exclude.genes <- unique(c(
@@ -47,31 +51,39 @@ for(i in 1:length(samples)) {
   
   
   # Doublet testing
-  pK <- paramSweep(s, PCs = 1:50, sct = FALSE)
+  npc <- min(50, ncol(s) - 1)
+  pK <- paramSweep(s, PCs = 1:npc, sct = FALSE)
   sweep.stats <- summarizeSweep(pK, GT = FALSE)
   bcmvn <- find.pK(sweep.stats)
-  best.pK <- as.numeric(as.character(bcmvn[which.max(bcmvn$BCmetric), "pK"]))
+  best.pK <- as.numeric(as.character(bcmvn$pK[which.max(bcmvn$BCmetric)]))
+  if (length(best.pK) == 0 || is.na(best.pK)) best.pK <- 0.01
   nExp <- round(0.03 * ncol(s))
   
-  s <- doubletFinder(s, PCs = 1:50, pN = 0.25, pK = best.pK,
+  s <- doubletFinder(s, PCs = 1:npc, pN = 0.25, pK = best.pK,
                      nExp = nExp, reuse.pANN = FALSE, sct = FALSE)
-  colnames(s@meta.data)[8]<-"scDbl_class"
-  s$sample<-samples[i]
+  colnames(s@meta.data)[8] <- "scDbl_class"
+  s <- subset(s, scDbl_class == "Singlet")
+  
+  
+  # ---- annotate & collect ----
+  s$sample <- samples[i]
+  s$mut <- gene_variants[i]
   sce[[i]] <- s
-  summary_df <- rbind(summary_df, c(samples[i], ncol(s)))
+  summary_df <- rbind(summary_df, c(samples[i], n_qc, ncol(s)))
 }
 
 names(sce)<-samples
 summary_df
-saveRDS(sce,file="1_readsceList.RDS")
+write.xlsx(summary_df,file="00_scCellcountDetails.xlsx")
+saveRDS(sce,file="2_readsceList.RDS")
 
 #####2 ----merge samples-----
-sce<-readRDS("1_readsceList.RDS")
+sce<-readRDS("2_readsceList.RDS")
 pbmc1 <- merge(x = sce[[1]], y = sce[-1], add.cell.ids = names(sce), project = "pbmc1")
 table(pbmc1$sample)
 table(sapply(rownames(pbmc1@meta.data), function(x){strsplit(x, split = "_")[[1]][1]}))
-table(pbmc1$scDbl_class)
-pbmc1 <- subset(pbmc1, scDbl_class == "Singlet")
+table(pbmc1$scDbl_class) #ncol is 174,561
+#pbmc1 <- subset(pbmc1, scDbl_class == "Singlet")
 ###whole data normalization
 pbmc1 <- NormalizeData(pbmc1, normalization.method = "LogNormalize", scale.factor = 10000)
 
@@ -91,7 +103,7 @@ length(hvgs)
 gene_count <- sapply(hvgs, function(g){sum(sapply(hvg_list, function(hvgs_sample) g %in% hvgs_sample))})
 threshold <- sort(gene_count, decreasing = TRUE)[1500]
 hvgs_top1500 <- names(gene_count[gene_count >= threshold])
-length(hvgs_top1500)#1771
+length(hvgs_top1500)#1789
 hvgs<-hvgs_top1500
 
 ###correct 
@@ -100,7 +112,7 @@ length(pbmc1@assays$RNA@var.features)
 g2m_genes <- CaseMatch(search = cc.genes$g2m.genes, match = rownames(pbmc1))
 s_genes  <- CaseMatch(search = cc.genes$s.genes,  match = rownames(pbmc1))
 pbmc1 <- CellCycleScoring(pbmc1, g2m.features = g2m_genes, s.features = s_genes)
-pbmc1 <- ScaleData(pbmc1, vars.to.regress = c("percent.mt", "S.Score", "G2M.Score"))
+pbmc1 <- ScaleData(pbmc1, vars.to.regress = c("percent.mt"))#, "S.Score", "G2M.Score"))
 pbmc1 <- RunPCA(pbmc1, features = VariableFeatures(pbmc1), npcs = 50)
 pbmc1@meta.data <- pbmc1@meta.data %>% mutate(datasets = str_split_fixed(rownames(pbmc1@meta.data), "_", 2)[,1])
 pbmc1 <- RunHarmony(pbmc1, group.by.vars = "datasets", dims.use = 1:50)# theta = 2) 
@@ -108,7 +120,7 @@ pbmc1 <- RunHarmony(pbmc1, group.by.vars = "datasets", dims.use = 1:50)# theta =
 
 #####3 ----Cell clustering-----
 pbmc1 <- FindNeighbors(pbmc1, dims = 1:50, reduction = "harmony")
-pbmc1 <- FindClusters(pbmc1, resolution = 0.45)
+pbmc1 <- FindClusters(pbmc1, resolution = 0.25)
 length(unique(pbmc1$seurat_clusters))
 set.seed(123)
 pbmc1 <- RunUMAP(pbmc1, reduction = "harmony", dims = 1:50, 
@@ -131,6 +143,8 @@ p3
 #saveRDS(pbmc1,file="pbmc1.RDS")
 pbmc1<-readRDS("pbmc1.RDS")
 
+
+
 #####4 ----Cell annotation-----
 library(COSG)
 marker_cosg <- cosg(
@@ -140,146 +154,72 @@ marker_cosg <- cosg(
   expressed_pct=0.1)
 
 View(marker_cosg$names)
-Count_marker()
-Count_marker2()
-View(sce2.markers[sce2.markers$cluster==1,])
-sce2Con.marker[match(12,unique(pbmc1$seurat_clusters))]
-View(sce2.markers[sce2.markers$gene%in%CD14_Monocyte,])
-View(sce2.markers[sce2.markers$gene%in%CD4T,])
-grep(CD4T,sce2Con.marker)
 
-
-cols = c("#DCD4D5B4","red")
-DefaultAssay(pbmc1)<-"RNA"
-cell_markers<- list(
-  Naive_CD4_T=unique(c("CD4","CCR7","SELL","LEF1","TCF7","IL7R","LTB")),
-  Memory_CD4_T=unique(c("CD4","IL7R","CD44","CD27","CXCR3","RGS1","CREM","CD3D")),
-  Effector_CD4_T=unique(c("CD4","GATA3","IL17A","IL17F","CXCL3","ICOS")),
-  Naive_CD8_T=unique(c("CD8A","CD8B","CCR7","SELL","LEF1","TCF7","IL7R","LTB")),
-  Memory_CD8_T=unique(c("CD8A","IL7R","CD27","GZMK","EOMES","CD44","KLRG1","RGS1","CREM","CD3D")),
-  Effector_CD8_T=unique(c("CD8A","IFNG","GZMB","PRF1","KLRG1","NKG7","LAMP1")),
-  Effective_Memory_T=unique(c("NKG7","GZMK","IFNG")),
-  Treg=unique(c("FOXP3","IL2RA","CTLA4","IKZF2","TNFRSF18")),
-  gamma_delta_T=unique(c("TRDC","TRGC1","TRGC2","RORC","ZBTB16","CXCR6")),
-  NKT=unique(c("ZBTB16","TRAC","CD3D","KLRD1","KLRK1","KLRB1","IL17RA","CD4")),
-  NK=unique(c("NKG7","GZMB","PRF1","KLRD1","KLRK1","KLRC1","KLRB1","CCL5")),
-  B_cell=unique(c("CD19","CD79A","CD79B","MS4A1","BANK1","CD37")),
-  Plasma_cell=unique(c("XBP1","MZB1","SDC1","JCHAIN","IGHA1","IGHM","IGHD")),
-  CD14_Monocyte=unique(c("CD14","LYZ","LY6C2","S100A8","S100A9","VCAN","CCL2","CTSS")),
-  CD16_Monocyte=unique(c("FCGR3A","MS4A7","LST1","IFITM3","CSF1R","CD68")),
-  DC=unique(c("FCER1A","CD1C","XCR1")),
-  Macrophage=unique(c("ADGRE1","CD68","CD63","CXCL2","CCR1","NLRP3","VEGFA")),
-  Neutrophil=unique(c("FCGR3B","S100A8","S100A9","MPO","ELANE","RETNLG")),
-  LDG=unique(c("FCGR3B","FUT4","CEACAM8","CSF3R","CMTM2","NCF1","SRGN","TREM1","IL1RN","IFITM2")),
-  aDC=unique(c("CD40","CD80","CD86","IL12A","CCR7","LAMP3","CD83","IL1B","ITGAX")),
-  pDC=unique(c("PLD4","SIGLEC6","IL3RA","LILRA4","CD123","IRF7","CLEC4C","TCF4","BST2")),
-  cDC1=unique(c("XCR1","CLEC9A","BATF3","IRF8","ITGAX","CADM1")),
-  cDC2=unique(c("CD209","CLEC10A","FCER1G","IRF4","KLF4","SIRPA","ITGAM")),
-  mDC=unique(c("CD1C","CD11C","ITGAX","FCER1A","CLEC10A","HLA-DQB1","HLA-DRA","FCGR2B","VCAN")),
-  LAMP3_matureDC=unique(c("LAMP3","CCR7","FSCN1","CCL19","CCL22")),
-  Platelet=unique(c("PF4","PPBP","ITGA2B","GP1BA","TUBB1")),
-  CD8T=unique(c("CD3D","CD3G","CD3E","CD247","CD8A","CD8B","GZMK")),
-  CD4T=unique(c("CD3D","CD3G","CD3E","CD247","CCR7","IL7R","CD4")),
-  Erythrocyte=unique(c("HBB","HBA1","HBA2","ALAS2","ANK1")),
-  Cytotoxic_CD8T=unique(c( "CD8A","CD8B","NKG7","GNLY","GZMB","GZMH","GZMK",
-                           "PRF1","CTSW","IFNG","CCL5","TBX21","EOMES","CX3CR1","FGFBP2","LAMP1","CST7")))
-
-B_markers <- list(
-  # Pan-B cell
-  Total_B = c("CD19", "CD79A", "CD79B", "MS4A1", "CD37", "CD74", "HLA-DRA"),
-  # Transitional B: CD24hi CD38hi CD10+ IgMhi CD27-
-  Transitional_B = c("TCL1A", "CD24", "CD38", "MME", "IL4R", "IGHM", "IGHD"),
-  # Mature naive B: IgM+ IgDhi CD27- CD38low
-  Naive_B = c("IGHM", "IGHD", "FCER2", "MS4A1", "CD22", "HVCN1", "TCL1A"),
-  # Unswitched memory B: CD27+ IgM+ ±IgD
-  Unswitched_memory_B = c("CD27", "IGHM", "IGHD", "FCRL1", "TNFRSF13B", "GPR183"),
-  # Switched memory B: IgD- IgG+ or IgA+, usually CD27+
-  Switched_memory_B = c("CD27", "IGHG1", "IGHG2", "IGHG3", "IGHG4", "IGHA1", "IGHA2", "TNFRSF13B", "GPR183"),
-  # Double-negative B: CD27- IgD-
-  Double_negative_B = c("FCRL5", "FCRL3", "ITGAX", "TBX21", "IGHG1", "IGHA1"),
-  # Atypical memory / DN2-like B
-  Atypical_memory_B = c("FCRL5", "FCRL3", "ITGAX", "TBX21", "SIGLEC6", "ZEB2"),
-  # Activated B: activation/state markers
-  Activated_B = c("CD69", "CD83", "CD86", "CD40", "MYC", "NFKBIA", "TNFAIP3"),
-  # Plasmablast: antibody-secreting program
-  Plasmablast = c("CD38", "MZB1", "JCHAIN", "XBP1", "PRDM1", "IRF4", "DERL3", "FKBP11", "SEC11C"),
-  # Mature plasma cell: terminally differentiated ASC
-  Plasma_cell = c("SDC1", "TNFRSF17", "MZB1", "JCHAIN", "XBP1", "PRDM1", "IRF4", "DERL3", "FKBP11", "SEC11C"))
-DC_markers <- list(
-  mDC_cDC = c("ITGAX","CD1C","HLA-DRA","CD86","CD83"),
-  cDC1 = c("ITGAX","XCR1","CLEC9A"),
-  cDC2 = c("ITGAX","CD1C","SIRPA"),
-  pDC = c("TCF4","IRF7","CLEC4C","LILRA4"))
-
-DefaultAssay(pbmc1)<-"RNA"
-DotPlot(pbmc1,features=unique(
-  c(DC_markers$cDC2
-    )),
-  assay='RNA',
-  cols=cols)+RotatedAxis()+theme(
-    axis.line = element_blank(),
-    legend.text = element_text(size=10),
-    legend.title=element_text(size=10),
-    axis.text.x = element_text(angle= 90 , vjust= .5 , hjust= 1 ),
-    axis.text.y= element_text(angle= 45 , vjust= .5 , hjust= 1 ),
-    panel.border = element_rect(color = "black", size = 1, fill = NA))+ylab(NULL)+xlab(NULL)
-
+pbmc1<-subset(pbmc1,seurat_clusters%in%c(1,2,3,4,5,6,7,8,9,10,
+                                         11,12,13,14,15,16,17,18,20,
+                                         22,23,24,25))
 
 Idents(pbmc1) <- "seurat_clusters"
 pbmc1<-RenameIdents(pbmc1,
-                    '0'='Naive CD4 T',#"CD4","SELL","CCR7","LEF1" done 2
-                    '1'='Naive CD8 T',#"CD8A","CD8B","CCR7","LEF1" done 2
-                    '2'='CD14 Monocyte',#"CD14","S100A8","S100A9" done 2
-                    '3'='Naive B',#"CD19","IGHM","IGHD","TCL1A" done 2
-                    '4'='NK', #"NKG7","gzmb","KLRD1" done   2       
-                    '5'='Cytotoxic CD8 T',# "CD8A","CD8B","GZMK","GZMH" done 2
-                    '6'='Naive CD4 T',#"CD4","SELL","CCR7","LEF1" done 2
-                    '7' = 'Naive CD8 T',#"CD8A","CD8B","CCR7","LEF1" done 2
-                    '8' = 'Treg',#"FOXP3","IL2RA","IKZF2" done 2
-                    '9'='Platelet',#"PF4","PPBP","ITGA2B" done 2
-                    '10'='Memory B',# "GPR183","TNFRSF13B","CD24" done 2
-                    '11'='CD14 Monocyte',#2
-                    '12'='γδT',#"TRGC1", "TRGC2","CXCR6" done 2
-                    '13'='Erythrocyte', # "HBB","HBA1","HBA2" done 2         
-                    '14'='CD16 Monocyte',#"FCGR3A","MS4A7","LST1" done 2
-                     '15'='Naive B',#"CD19","IGHM","IGHD","TCL1A" done 2
-                    '16'='NK',#"NKG7","gzmb","KLRD1" done   2 
-                    '17'='CD14 Monocyte',#"CD14","S100A8","S100A9" done 2
-                    '18'='pDC',#"PLD4","IL3RA","IRF7" done 2
-                    '19'='Plasma',#"JCHAIN","XBP1","MZB1" CD19- CD38+ CD27+ done 2
-                    '20'='CD14 Monocyte',#"CD14","S100A8","S100A9" done 2
-                    '21'='Naive B'#"CD19","IGHM","IGHD","TCL1A" done 2
-                    )
+                    '0'='Naive CD4 T',#"CD4","SELL","CCR7","TCF7" done 
+                    '1'='Naive CD8 T',#"CD8A","CD8B","CCR7","LEF1"  done
+                    '2'='CD14 Monocyte',#"CD14","S100A8","S100A9" done
+                    '3'='Naive B',#"IGHD","IGHD","TCL1A","IL4R" done
+                    '4'='NK', #"NKG7","KLRF1","KLRD1" done         
+                    '5'='Cytotoxic CD8 T',# "CD8A","CD8B","GZMA","GZMB","GZMH" done 
+                    '6'='Memory CD4 T',#"AQP3","TSHZ2","CD40LG","IL7R" done
+                    '7' = 'γδT',#"TRGC1", "TRGC2","CXCR6"  done
+                    '8' = 'Treg',#"FOXP3","IL2RA","IKZF2" done
+                    '9'='Memory B',#"FCRL5", "FCRL2", "CD24","TNFRSF13B","CD80","IGHG3" done 
+                    '10'='CD14 Monocyte',# #"CD14","S100A8","S100A9" done
+                    '11'='Platelet',# "PF4","PPBP","ITGA2B" done
+                    '12'='γδT',#"TRGC1", "TRGC2","CXCR6"  done
+                    '13'='CD16 Monocyte',#"FCGR3A","MS4A7","LST1"  done        
+                    '14'='Erythrocyte',#"HBB","HBA2","HBA1" done 
+                    '15'='Naive B',#"IGHD","IGHD","TCL1A","IL4R" done 
+                    '16'='NK', #"NKG7","KLRF1","KLRD1" done 
+                    '17'='pDC',#"PLD4","IL3RA","IRF7","IL3RA" done 
+                    '18'='CD14 Monocyte',# #"CD14","S100A8","S100A9" done
+                    '19'='Plasma',#"JCHAIN","XBP1","MZB1", done CD19- CD38+ CD27+ 
+                    '20'='Naive B',#"IGHD","IGHD","TCL1A","IL4R" done
+                    #'21'='Prolif cell',#"TOP2A","MKI67"
+                    '22'='CD14 Monocyte',# #"CD14","S100A8","S100A9" done
+                    '23'='Naive B',#"IGHD","IGHD","TCL1A","IL4R" done
+                    '24'='Cytotoxic CD8 T',# "CD8A","CD8B","GZMA","GZMB","GZMH" done 
+                    '25'='Naive CD8 T'#"CD8A","CD8B","CCR7","LEF1"  done
+)
 pbmc1@meta.data$celltype <- Idents(pbmc1)
+
 length(unique(pbmc1$celltype))#15
 sample_map <- tibble(
   sample = c("C1","C2","C3","C4","C5","C6",
              "poly1","poly2","poly3","poly4","poly5","poly6",
-             "182LPIN2","181NOD2","183NOD2","200PSTPIP1","190PSTPIP1"),
+             "157LACC1","182LPIN2","181NOD2","183NOD2","200PSTPIP1","190PSTPIP1"),
   sample2 = c("C1","C2","C3","C4","C5","C6",
               "PJ1","PJ2","PJ3","PJ4","PJ5","PJ6",
-              "P9","P12","P13","P14","P15"))
+             "P7", "P10","P14","P15","P17","P18"))
 pbmc1@meta.data <- pbmc1@meta.data %>%left_join(sample_map, by = "sample")
 
 pbmc1@meta.data<-pbmc1@meta.data%>%mutate(status=case_when(
   sample%in%c("C1","C2","C3","C4","C5","C6")~"Healthy controls",
   sample%in%c("poly1","poly2","poly3","poly4","poly5","poly6")~"Polygenic JIA",
-  sample%in%c("182LPIN2","181NOD2","183NOD2","190PSTPIP1","200PSTPIP1")~"Monogenic JIA"))
+  sample%in%c("157LACC1","182LPIN2","181NOD2","183NOD2","190PSTPIP1","200PSTPIP1")~"Monogenic JIA"))
 status_level<-c("Healthy controls","Polygenic JIA","Monogenic JIA")
 
 #####5 ----Cell UMAP-----
-celltype_levels <- c("Naive CD4 T","Naive CD8 T","NK","Treg","Cytotoxic CD8 T",
+celltype_levels <- c("Naive CD4 T","Memory CD4 T",
+                     "Naive CD8 T","NK","Treg","Cytotoxic CD8 T",
                      "γδT","Naive B","Memory B","Plasma","CD14 Monocyte",
                      "CD16 Monocyte","pDC","Platelet","Erythrocyte")
-cell_color_vec <- c("#847AB3","#6699CC","#86C7B4","#007ABA","#9CD2ED",
+cell_color_vec <- c("#847AB3","#96AF95","#6699CC","#86C7B4","#007ABA","#9CD2ED",
                     "#F1BAAB","#BB0021", "#D9C2D9","#FEC260","#AF478A",
                     "#EC706E","#B5BBE3","#E2A9C9","#CBDAA9")
 names(cell_color_vec) <- celltype_levels
 
 sample_level <- c("C1","C2","C3","C4","C5","C6",
                   "poly1","poly2","poly3","poly4","poly5","poly6",
-                  "182LPIN2","181NOD2","183NOD2","200PSTPIP1","190PSTPIP1")
-cell_color_vec2 <- c("#847AB3","#6699CC","#86C7B4","#007ABA","#9CD2ED",
+                  "157LACC1","182LPIN2","181NOD2","183NOD2","200PSTPIP1","190PSTPIP1")
+cell_color_vec2 <- c("#847AB3","#96AF95","#6699CC","#86C7B4","#007ABA","#9CD2ED",
                      "#F1BAAB","#BB0021", "#D9C2D9","#FEC260","#AF478A",
                      "#EC706E","#B5BBE3","#E2A9C9","#CBDAA9","#B1DA99",
                      "#7B1FA2","#FFEFC1")
@@ -334,17 +274,18 @@ P1_status <- plot_umap_standard(pbmc1,
 
 library(patchwork)
 p1<-P1_celltype|P1_samples|P1_status
-ggsave(p1,file="E:/Cohort PPT/JIA/code//00_0.05umap.pdf",width = 19.97,height = 3.25)
-
+ggsave(p1,file="E:/Cohort PPT/JIA/code/00_0.05umap.pdf",width = 19.97,height = 3.25)
+saveRDS(pbmc1,file="pbmc1.RDS")
 
 
 #####6 ----Cell Proportion-----
 ####(1) total cell count to calculated cell fraction
 PlotCountDistribution <- function(seu, Count_var, color_vec){
+  library(purrr)
   df <- table(seu@meta.data[[Count_var]]) %>%
     as.data.frame() %>%
     set_names(c("group","n")) %>%
-    mutate(frac = n / sum(n) * 100, label = sprintf("%.1f%%", frac)) %>%
+    mutate(frac = n / sum(n) * 100, label = sprintf("%.2f%%", frac)) %>%
     arrange(desc(frac))
   df$group <- factor(df$group, levels = rev(df$group))
   
@@ -383,15 +324,126 @@ plist_celltype <- PlotCountDistribution(pbmc1, Count_var = "celltype", color_vec
 plist_status <- PlotCountDistribution(pbmc1, Count_var = "status", color_vec = cell_color_vec3)
 plist_celltype$lollipop/plist_status$donut
 plist_celltype$donut/plist_status$donut
-
-
-
 p_comb <- plist_celltype$lollipop + inset_element(
-  plist_status$donut+theme(legend.position = "none"),
-  left = 0.32, bottom = 0.018, right = 0.98, top = 0.38
-)
-p_comb 
-ggsave(p_comb,file="E:/Cohort PPT/JIA/code//01_PropDonut.pdf",width = 3.27,height = 3.38)
+plist_status$donut+theme(legend.position = "none"),
+left = 0.32, bottom = 0.018, right = 0.98, top = 0.38);p_comb 
+
+PlotCountDistribution <- function(seu, Count_var, color_vec, split_by = NULL, split_keep = NULL, group_order = NULL){
+  meta <- seu@meta.data
+  if (!is.null(split_by)) {
+    grp <- as.character(meta[[Count_var]])
+    sub <- as.character(meta[[split_by]])
+    grp[grp %in% split_keep] <- sub[grp %in% split_keep]
+    meta[[Count_var]] <- grp
+  }
+  df <- table(meta[[Count_var]]) %>%
+    as.data.frame() %>%
+    set_names(c("group","n")) %>%
+    mutate(frac = n / sum(n) * 100, label = sprintf("%.2f%%", frac)) %>%
+    arrange(desc(frac))
+  if (is.null(group_order)) df$group <- factor(df$group, levels = rev(df$group))
+  else df$group <- factor(df$group, levels = group_order)
+  p_bar_h <- ggplot(df, aes(y = group, x = frac, fill = group)) +
+    geom_col(width = 0.7) +
+    geom_text(aes(label = label), hjust = -0.15, size = 3, colour = "black") +
+    scale_fill_manual(values = color_vec) +
+    labs(x = "Percentage (%)", y = NULL) +
+    theme_classic() +
+    theme(legend.position = "none", axis.text = element_text(colour = "black"), plot.margin = margin(5, 15, 5, 5)) +
+    scale_x_continuous(expand = c(0, 0), limits = c(0, max(df$frac) * 1.12))
+  p_lollipop <- ggplot(df, aes(y = group, x = frac, color = group)) +
+    geom_segment(aes(x = 0, xend = frac, y = group, yend = group), color = "grey60", linewidth = 0.8) +
+    geom_point(size = 2.45) +
+    geom_text(aes(label = label), hjust = -0.15, size = 3, colour = "black") +
+    scale_color_manual(values = color_vec) +
+    labs(x = "Percentage (%)", y = NULL) +
+    theme_classic() +
+    theme(legend.position = "none", axis.text = element_text(colour = "black"), plot.margin = margin(5, 15, 5, 5)) +
+    scale_x_continuous(expand = c(0, 0), limits = c(0, max(df$frac) * 1.12))
+  p_donut <- ggplot(df, aes(x = 2, y = frac, fill = group)) +
+    geom_col(width = 1) +
+    geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 3, colour = "black") +
+    scale_fill_manual(values = color_vec) +
+    coord_polar("y", start = 0) +
+    xlim(0.5, 2.5) +
+    labs(x = NULL, y = NULL) +
+    theme_classic() +
+    theme(legend.title = element_blank(), axis.text = element_blank(), axis.line = element_blank(), axis.ticks = element_blank())
+  return(list(bar_h = p_bar_h, lollipop = p_lollipop, donut = p_donut))
+}
+
+PlotNestedDonut <- function(seu, outer_var, inner_var, outer_color, inner_color,
+                            outer_level = NULL, inner_level = NULL,
+                            outer_label = TRUE, inner_label = TRUE){
+  mk <- function(v, lv) {
+    d <- table(seu@meta.data[[v]]) %>% as.data.frame() %>% set_names(c("group","n")) %>%
+      mutate(frac = n / sum(n) * 100, label = sprintf("%.2f%%", frac))
+    if (!is.null(lv)) d$group <- factor(d$group, levels = lv)
+    d
+  }
+  do <- mk(outer_var, outer_level)
+  di <- mk(inner_var, inner_level)
+  p <- ggplot() +
+    geom_col(data = do, aes(x = 2.5, y = frac, fill = group), width = 1.4, colour = "white", linewidth = 0.3) +
+    scale_fill_manual(values = outer_color) +
+    ggnewscale::new_scale_fill() +
+    geom_col(data = di, aes(x = 1.1, y = frac, fill = group), width = 1.0, colour = "white", linewidth = 0.3) +
+    scale_fill_manual(values = inner_color) +
+    coord_polar("y", start = 0) +
+    xlim(0, 3.4) +
+    theme_void() +
+    theme(legend.title = element_blank(), axis.text = element_blank(), axis.line = element_blank(), axis.ticks = element_blank())
+  if (outer_label)
+    p <- p + geom_text(data = do, aes(x = 2.5, y = frac, label = label),
+                       position = position_stack(vjust = 0.5), size = 3, colour = "black")
+  if (inner_label)
+    p <- p + geom_text(data = di, aes(x = 1.1, y = frac, label = label),
+                       position = position_stack(vjust = 0.5), size = 2.6, colour = "black")
+  p
+}
+
+pbmc1@meta.data <- pbmc1@meta.data %>% mutate(genome = case_when(
+  sample %in% c("C1","C2","C3","C4","C5","C6") ~ "Healthy controls",
+  sample %in% c("poly1","poly2","poly3","poly4","poly5","poly6") ~ "Polygenic JIA",
+  sample %in% c("157LACC1") ~ "LACC1",
+  sample %in% c("182LPIN2") ~ "LPIN2",
+  sample %in% c("181NOD2","183NOD2") ~ "NOD2",
+  sample %in% c("190PSTPIP1","200PSTPIP1") ~ "PSTPIP1"))
+genome_level <- c("Healthy controls","Polygenic JIA","NOD2","PSTPIP1","LPIN2","LACC1")
+pbmc1@meta.data <- pbmc1@meta.data %>% mutate(pathway = case_when(
+  sample %in% c("C1","C2","C3","C4","C5","C6") ~ "Healthy controls",
+  sample %in% c("poly1","poly2","poly3","poly4","poly5","poly6") ~ "Polygenic JIA",
+  sample %in% c("157LACC1") ~ "Immune metabolism",
+  sample %in% c("182LPIN2") ~ "Inflammasome",
+  sample %in% c("181NOD2","183NOD2") ~ "NFKB",
+  sample %in% c("190PSTPIP1","200PSTPIP1") ~ "Inflammasome"))
+pathway_level <- c("Healthy controls","Polygenic JIA","NFKB","Inflammasome","Immune metabolism")
+
+cell_color_vec6 <- c("Healthy controls" = "#6699CC", "Polygenic JIA" = "#FEC260",
+                     "NOD2" = "#EC706E", "PSTPIP1" = "#96AF95",
+                     "LPIN2" = "#FFEFC1", "LACC1" = "#C8BBD5")
+cell_color_vec5 <- c("Healthy controls" = "#6699CC", "Polygenic JIA" = "#FEC260",
+                     "NFKB" = "#B3D1E7", "Inflammasome" = "#B07A99",
+                     "Immune metabolism" = "#847AB3")
+
+plist_celltype <- PlotCountDistribution(pbmc1, Count_var = "celltype", color_vec = cell_color_vec)
+plist_genome <- PlotCountDistribution(pbmc1, Count_var = "genome", color_vec = cell_color_vec6, group_order = genome_level)
+plist_status <- PlotCountDistribution(pbmc1, Count_var = "status", color_vec = cell_color_vec3)   # original kept
+
+plist_celltype$lollipop / plist_genome$donut
+plist_celltype$donut / plist_status$donut
+plist_celltype$donut / plist_genome$donut
+
+p_nested <- PlotNestedDonut(pbmc1,
+                            outer_var = "pathway", inner_var = "genome",
+                            outer_color = cell_color_vec5, inner_color = cell_color_vec6,
+                            outer_level = pathway_level, inner_level = genome_level)
+plist_celltype$donut / p_nested
+
+###check data
+sort(table(pbmc1$celltype)/ncol(pbmc1),decreasing = T)
+sort(table(pbmc1$genome)/ncol(pbmc1),decreasing = T)
+sort(table(pbmc1$pathway)/ncol(pbmc1),decreasing = T)
 
 ####(2) stack proportion grouped by samples or status
 library(Seurat)
@@ -401,7 +453,6 @@ library(patchwork)
 PlotStackedBar <- function(seu, Count_var, group_by_var, facet_by_status=FALSE, sample_order, color_vec){
   if(! "status" %in% colnames(seu@meta.data)) stop("metadata must contain 'status' column")
   status_level_fixed <- c("Healthy controls","Polygenic JIA","Monogenic JIA")
-  
   if(group_by_var=="status"){
     df <- table(seu@meta.data[[Count_var]], seu@meta.data[["status"]]) %>%
       as.data.frame() %>%
@@ -420,11 +471,8 @@ PlotStackedBar <- function(seu, Count_var, group_by_var, facet_by_status=FALSE, 
       ungroup()
     df$x_group <- factor(df$x_group, levels=sample_order)
   }
-  
   df$stack_group <- factor(df$stack_group, levels=names(color_vec))
   if("status" %in% colnames(df)) df$status <- factor(df$status, levels=status_level_fixed)
-  
-  # original vertical stacked
   p_base <- ggplot(df, aes(x=x_group, y=frac, fill=stack_group)) +
     geom_col(position=position_stack(), width=0.7) +
     scale_fill_manual(values=color_vec) +
@@ -435,15 +483,12 @@ PlotStackedBar <- function(seu, Count_var, group_by_var, facet_by_status=FALSE, 
           legend.title=element_blank(),
           plot.margin=margin(5,5,5,5)) +
     scale_y_continuous(expand=c(0,0))
-  
   p_no_facet <- p_base
   p_facet <- NULL
   if(isTRUE(facet_by_status) && group_by_var!="status"){
     p_facet <- p_base + facet_wrap(~status, ncol=3, scales="free_x") +
       theme(axis.text.x=element_text(angle=45, hjust=1, colour="black"))
   }
-  
-  # horizontal flip: x=Percentage, y=sample; sample top‑down = sample_order
   p_horiz_no_facet <- NULL
   p_horiz_facet <- NULL
   if(group_by_var != "status"){
@@ -458,7 +503,6 @@ PlotStackedBar <- function(seu, Count_var, group_by_var, facet_by_status=FALSE, 
             legend.title=element_blank(),
             plot.margin=margin(5,5,5,5)) +
       scale_x_continuous(expand=c(0,0))
-    
     p_horiz_no_facet <- p_horiz_base
     if(isTRUE(facet_by_status)){
       p_horiz_facet <- p_horiz_base +
@@ -466,35 +510,113 @@ PlotStackedBar <- function(seu, Count_var, group_by_var, facet_by_status=FALSE, 
         theme(strip.placement = "outside")
     }
   }
-  
   return(list(stack_no_facet=p_no_facet,
               stack_facet=p_facet,
               horiz_stack_no_facet=p_horiz_no_facet,
               horiz_stack_facet=p_horiz_facet))
 }
 
+# grouping columns
 sample_level <- c("C1","C2","C3","C4","C5","C6",
                   "poly1","poly2","poly3","poly4","poly5","poly6",
-                  "182LPIN2","181NOD2","183NOD2","200PSTPIP1","190PSTPIP1")
-cell_color_vec2 <- c("#847AB3","#6699CC","#86C7B4","#007ABA","#9CD2ED",
-                     "#F1BAAB","#BB0021", "#D9C2D9","#FEC260","#AF478A",
-                     "#EC706E","#B5BBE3","#E2A9C9","#CBDAA9","#B1DA99",
-                     "#7B1FA2","#FFEFC1")
-names(cell_color_vec2) <- sample_level
+                  "157LACC1","182LPIN2","181NOD2","183NOD2","200PSTPIP1","190PSTPIP1")
 pbmc1$sample <- factor(pbmc1$sample, levels = sample_level)
+pbmc1@meta.data <- pbmc1@meta.data %>% mutate(genome = case_when(
+  sample %in% c("C1","C2","C3","C4","C5","C6") ~ "Healthy controls",
+  sample %in% c("poly1","poly2","poly3","poly4","poly5","poly6") ~ "Polygenic JIA",
+  sample %in% c("157LACC1") ~ "LACC1",
+  sample %in% c("182LPIN2") ~ "LPIN2",
+  sample %in% c("181NOD2","183NOD2") ~ "NOD2",
+  sample %in% c("190PSTPIP1","200PSTPIP1") ~ "PSTPIP1"))
+genome_level <- c("Healthy controls","Polygenic JIA","NOD2","PSTPIP1","LPIN2","LACC1")
+pbmc1@meta.data <- pbmc1@meta.data %>% mutate(pathway = case_when(
+  sample %in% c("C1","C2","C3","C4","C5","C6") ~ "Healthy controls",
+  sample %in% c("poly1","poly2","poly3","poly4","poly5","poly6") ~ "Polygenic JIA",
+  sample %in% c("157LACC1") ~ "Immune metabolism",
+  sample %in% c("182LPIN2") ~ "Inflammasome",
+  sample %in% c("181NOD2","183NOD2") ~ "NFKB",
+  sample %in% c("190PSTPIP1","200PSTPIP1") ~ "Inflammasome"))
+pathway_level <- c("Healthy controls","Polygenic JIA","NFKB","Inflammasome","Immune metabolism")
+pbmc1@meta.data <- pbmc1@meta.data %>% mutate(mutation = case_when(
+  sample %in% c("C1","C2","C3","C4","C5","C6") ~ "Healthy controls",
+  sample %in% c("poly1","poly2","poly3","poly4","poly5","poly6") ~ "Polygenic JIA",
+  sample %in% c("181NOD2") ~ "M513K",
+  sample %in% c("183NOD2") ~ "C495Y",
+  sample %in% c("182LPIN2") ~ "I67R/K781TfsTer7",
+  sample %in% c("190PSTPIP1","200PSTPIP1") ~ "E250K",
+  sample %in% c("157LACC1") ~ "S366Ter/N19KfsTer31"))
+mutation_level <- c("Healthy controls","Polygenic JIA","M513K","C495Y",
+                    "I67R/K781TfsTer7","E250K","S366Ter/N19KfsTer31")
+mutation_expand_level <- c("C1","C2","C3","C4","C5","C6",
+                           "poly1","poly2","poly3","poly4","poly5","poly6",
+                           "M513K","C495Y","I67R/K781TfsTer7","E250K","S366Ter/N19KfsTer31")
+pathway_expand_level <- c("C1","C2","C3","C4","C5","C6",
+                          "poly1","poly2","poly3","poly4","poly5","poly6",
+                          "NFKB","Inflammasome","Immune metabolism")
+pbmc1@meta.data <- pbmc1@meta.data %>% mutate(mutation_expand = ifelse(
+  sample %in% c("C1","C2","C3","C4","C5","C6","poly1","poly2","poly3","poly4","poly5","poly6"),
+  as.character(sample), mutation))
+pbmc1@meta.data <- pbmc1@meta.data %>% mutate(pathway_expand = ifelse(
+  sample %in% c("C1","C2","C3","C4","C5","C6","poly1","poly2","poly3","poly4","poly5","poly6"),
+  as.character(sample), pathway))
 
+# colors (cell_color_vec = your 15-color celltype palette, local)
 status_level <- c("Healthy controls","Polygenic JIA","Monogenic JIA")
 cell_color_vec3 <- c("#6699CC","#FEC260","#AF478A")
 names(cell_color_vec3) <- status_level
+cell_color_vec2 <- c("#847AB3","#96AF95","#6699CC","#86C7B4","#007ABA","#9CD2ED",
+                     "#F1BAAB","#BB0021","#D9C2D9","#FEC260","#AF478A",
+                     "#EC706E","#B5BBE3","#E2A9C9","#CBDAA9","#B1DA99",
+                     "#7B1FA2","#FFEFC1")
+names(cell_color_vec2) <- sample_level
 
+##(a) Cell prop grouped by 6 HC, 6 Polygenic patients, and 6 monogenic samples
 res_hf <- PlotStackedBar(pbmc1, Count_var="celltype", group_by_var="sample", facet_by_status=TRUE, sample_order=sample_level, color_vec=cell_color_vec)
-res_hf$horiz_stack_facet+theme(legend.position = "none")
-res_hf$stack_facet+theme(legend.position = "none")
+res_hf$horiz_stack_facet + theme(legend.position = "none")
+res_hf$stack_facet + theme(legend.position = "none")
 
-res_status_agg <- PlotStackedBar(pbmc1,Count_var = "celltype",group_by_var = "status",facet_by_status = FALSE,sample_order = sample_level,color_vec = cell_color_vec)
+##(b) Cell prop grouped by healthy controls, polygenetic, and monogenic patients
+res_status_agg <- PlotStackedBar(pbmc1, Count_var="celltype", group_by_var="status", facet_by_status=FALSE, sample_order=sample_level, color_vec=cell_color_vec)
 res_status_agg$stack_no_facet
 
+##(c) Cell prop grouped by healthy controls, polygenetic, and 6 gene mutations
+res_mut_big <- PlotStackedBar(pbmc1, Count_var="celltype", group_by_var="mutation",
+                              facet_by_status=FALSE, sample_order=mutation_level, color_vec=cell_color_vec)
+res_mut_big$stack_no_facet
+res_mut_big$horiz_stack_no_facet
+
+##(d) Cell prop grouped by  6 HC, 6 Polygenic patients, and 6 gene mutations
+res_mut_samp <- PlotStackedBar(pbmc1, Count_var="celltype", group_by_var="mutation_expand",
+                               facet_by_status=TRUE, sample_order=mutation_expand_level, color_vec=cell_color_vec)
+res_mut_samp$stack_facet + theme(legend.position = "none")
+res_mut_samp$horiz_stack_facet + theme(legend.position = "none")
+res_mut_samp$stack_no_facet
+res_mut_samp$horiz_stack_no_facet
+
+##(e) Cell prop grouped by healthy controls, polygenetic, and  pathways
+res_path_big <- PlotStackedBar(pbmc1, Count_var="celltype", group_by_var="pathway",
+                               facet_by_status=FALSE, sample_order=pathway_level, color_vec=cell_color_vec)
+res_path_big$stack_no_facet
+res_path_big$horiz_stack_no_facet
+
+##(f) Cell prop grouped by6 HC, 6 Polygenic patients, and  pathways
+res_path_samp <- PlotStackedBar(pbmc1, Count_var="celltype", group_by_var="pathway_expand",
+                                facet_by_status=TRUE, sample_order=pathway_expand_level, color_vec=cell_color_vec)
+res_path_samp$stack_facet + theme(legend.position = "none")
+res_path_samp$horiz_stack_facet + theme(legend.position = "none")
+res_path_samp$stack_no_facet
+res_path_samp$horiz_stack_no_facet
+
 ####(3)significant test for cell proportions
+resultCount<-as.data.frame.matrix(table(pbmc1$sample,pbmc1$celltype))
+resultCount$sample<-rownames(resultCount)
+resultCount<-resultCount%>%select(sample,everything())
+write.csv(resultCount,file="E:\\Cohort PPT\\JIA\\code\\CellPreprocess\\resultCount.csv",row.names=F,fileEncoding = "UTF-8")
+write.csv(resultCount,file = "resultCount.csv",
+row.names = FALSE,fileEncoding = "UTF-8")
+
+
+##(a) Compare for three groups
 library(tidyverse)
 sccoda_hm<-read.csv("./CellPreprocess/0827scCODA_mono_vs_HC.csv")
 sccoda_hp<-read.csv("./CellPreprocess/0827scCODA_poly_vs_HC.csv")
@@ -552,9 +674,160 @@ plot_scCODA_sig_lollipop_facet<-function(df_sig,point_size=2.5,errorbar_linewidt
 plot_list<-plot_scCODA_sig_lollipop_facet(allsccoda,point_size=1.8,errorbar_linewidth=0.5)
 p_hori<-plot_list$p_horizontal
 p_vert<-plot_list$p_vertical
-
 print(p_hori)
 print(p_vert)
+
+##(b) Compare for specific monogenic groups (by pathways)
+celltype_levels <- c("Naive CD4 T","Memory CD4 T",
+                     "Naive CD8 T","NK","Treg","Cytotoxic CD8 T",
+                     "γδT","Naive B","Memory B","Plasma","CD14 Monocyte",
+                     "CD16 Monocyte","pDC","Platelet","Erythrocyte")
+cell_color_vec <- c("#847AB3","#96AF95","#6699CC","#86C7B4","#007ABA","#9CD2ED",
+                    "#F1BAAB","#BB0021","#D9C2D9","#FEC260","#AF478A",
+                    "#EC706E","#B5BBE3","#E2A9C9","#CBDAA9")
+names(cell_color_vec) <- celltype_levels
+
+contrast_level <- c("Polygenic JIA_vs_Healthy controls",
+                    "NFKB_vs_Healthy controls",
+                    "Inflammasome_vs_Healthy controls",
+                    "Immune metabolism_vs_Healthy controls",
+                    "NFKB_vs_Polygenic JIA",
+                    "Inflammasome_vs_Polygenic JIA",
+                    "Immune metabolism_vs_Polygenic JIA")
+contrast_col <- c("#FEC260","#E67E22","#E74C3C","#8E44AD",
+                  "#3498DB","#1ABC9C","#2E86C1")
+names(contrast_col) <- contrast_level
+
+
+plot_scCODA_sig_lollipop_facet <- function(df_sig, point_size = 2.5, errorbar_linewidth = 0.35){
+  df_sig$Cell.Type <- factor(df_sig$Cell.Type, levels = intersect(celltype_levels, unique(df_sig$Cell.Type)))
+  df_sig$Contrast <- factor(df_sig$Contrast, levels = intersect(contrast_level, unique(df_sig$Contrast)))
+  p1 <- ggplot(df_sig, aes(x = log2FC, y = Cell.Type, color = Contrast)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.4) +
+    geom_errorbarh(aes(xmin = HDI.3., xmax = HDI.97.), height = 0.22, linewidth = errorbar_linewidth) +
+    geom_point(size = point_size) +
+    scale_color_manual(values = contrast_col) +
+    labs(x = "log2FC (cell proportion)", y = "Cell Type") +
+    theme_classic() +
+    theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6),
+          panel.grid.major = element_line(colour = "grey90", linewidth = 0.25, linetype = "dashed"),
+          panel.grid.minor = element_line(colour = "grey90", linewidth = 0.15, linetype = "dashed"),
+          axis.text.x = element_text(angle = 0, hjust = 0.5, colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          axis.title = element_text(colour = "black"),
+          axis.ticks = element_line(colour = "black"),
+          legend.position = "none",
+          strip.background = element_rect(fill = "white", color = "black"),
+          strip.text = element_text(colour = "black")) +
+    facet_wrap(~Contrast, scales = "free", ncol = 3)
+  p2 <- ggplot(df_sig, aes(x = Cell.Type, y = log2FC, color = Contrast)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.4) +
+    geom_errorbar(aes(ymin = HDI.3., ymax = HDI.97.), width = 0.22, linewidth = errorbar_linewidth) +
+    geom_point(size = point_size) +
+    scale_color_manual(values = contrast_col) +
+    labs(x = "Cell Type", y = "log2FC (cell proportion)") +
+    theme_classic() +
+    theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6),
+          panel.grid.major = element_line(colour = "grey90", linewidth = 0.25, linetype = "dashed"),
+          panel.grid.minor = element_line(colour = "grey90", linewidth = 0.15, linetype = "dashed"),
+          axis.text.x = element_text(angle = 45, hjust = 1, colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          axis.title = element_text(colour = "black"),
+          axis.ticks = element_line(colour = "black"),
+          legend.position = "none",
+          strip.background = element_rect(fill = "white", color = "black"),
+          strip.text = element_text(colour = "black")) +
+    facet_wrap(~Contrast, scales = "free", ncol = 3)
+  colby_groups_horizontal <- ggplot(df_sig, aes(x = log2FC, y = Cell.Type, color = Contrast)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.4) +
+    geom_errorbarh(aes(xmin = HDI.3., xmax = HDI.97.), height = 0.22, linewidth = errorbar_linewidth,
+                   position = position_dodge(width = 0.6)) +
+    geom_point(size = point_size, position = position_dodge(width = 0.6)) +
+    scale_color_manual(values = contrast_col) +
+    labs(x = "log2FC (cell proportion)", y = "Cell Type") +
+    theme_classic() +
+    theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6),
+          panel.grid.major = element_line(colour = "grey90", linewidth = 0.25, linetype = "dashed"),
+          panel.grid.minor = element_line(colour = "grey90", linewidth = 0.15, linetype = "dashed"),
+          axis.text.x = element_text(angle = 0, hjust = 0.5, colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          axis.title = element_text(colour = "black"),
+          axis.ticks = element_line(colour = "black"),
+          legend.position = "right",
+          legend.title = element_blank(),
+          legend.text = element_text(size = 8)) +
+    scale_y_discrete(drop = TRUE)
+  colby_groups_vertical <- ggplot(df_sig, aes(x = Cell.Type, y = log2FC, color = Contrast)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.4) +
+    geom_errorbar(aes(ymin = HDI.3., ymax = HDI.97.), width = 0.22, linewidth = errorbar_linewidth,
+                  position = position_dodge(width = 0.6)) +
+    geom_point(size = point_size, position = position_dodge(width = 0.6)) +
+    scale_color_manual(values = contrast_col) +
+    labs(x = "Cell Type", y = "log2FC (cell proportion)") +
+    theme_classic() +
+    theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6),
+          panel.grid.major = element_line(colour = "grey90", linewidth = 0.25, linetype = "dashed"),
+          panel.grid.minor = element_line(colour = "grey90", linewidth = 0.15, linetype = "dashed"),
+          axis.text.x = element_text(angle = 45, hjust = 1, colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          axis.title = element_text(colour = "black"),
+          axis.ticks = element_line(colour = "black"),
+          legend.position = "right",
+          legend.title = element_blank(),
+          legend.text = element_text(size = 8)) +
+    scale_x_discrete(drop = TRUE)
+  colby_celltype_horizontal <- ggplot(df_sig, aes(x = log2FC, y = Contrast, color = Cell.Type)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.4) +
+    geom_errorbarh(aes(xmin = HDI.3., xmax = HDI.97.), height = 0.22, linewidth = errorbar_linewidth,
+                   position = position_dodge(width = 0.6)) +
+    geom_point(size = point_size, position = position_dodge(width = 0.6)) +
+    scale_color_manual(values = cell_color_vec) +
+    labs(x = "log2FC (cell proportion)", y = "Contrast") +
+    theme_classic() +
+    theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6),
+          panel.grid.major = element_line(colour = "grey90", linewidth = 0.25, linetype = "dashed"),
+          panel.grid.minor = element_line(colour = "grey90", linewidth = 0.15, linetype = "dashed"),
+          axis.text.x = element_text(angle = 0, hjust = 0.5, colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          axis.title = element_text(colour = "black"),
+          axis.ticks = element_line(colour = "black"),
+          legend.position = "right",
+          legend.title = element_blank(),
+          legend.text = element_text(size = 8)) +
+    scale_y_discrete(drop = TRUE)
+  colby_celltype_vertical <- ggplot(df_sig, aes(x = Contrast, y = log2FC, color = Cell.Type)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.4) +
+    geom_errorbar(aes(ymin = HDI.3., ymax = HDI.97.), width = 0.22, linewidth = errorbar_linewidth,
+                  position = position_dodge(width = 0.6)) +
+    geom_point(size = point_size, position = position_dodge(width = 0.6)) +
+    scale_color_manual(values = cell_color_vec) +
+    labs(x = "Contrast", y = "log2FC (cell proportion)") +
+    theme_classic() +
+    theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6),
+          panel.grid.major = element_line(colour = "grey90", linewidth = 0.25, linetype = "dashed"),
+          panel.grid.minor = element_line(colour = "grey90", linewidth = 0.15, linetype = "dashed"),
+          axis.text.x = element_text(angle = 45, hjust = 1, colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          axis.title = element_text(colour = "black"),
+          axis.ticks = element_line(colour = "black"),
+          legend.position = "right",
+          legend.title = element_blank(),
+          legend.text = element_text(size = 8)) +
+    scale_x_discrete(drop = TRUE)
+  return(list(p_horizontal = p1, p_vertical = p2,
+              colby_groups_horizontal = colby_groups_horizontal,
+              colby_groups_vertical = colby_groups_vertical,
+              colby_celltype_horizontal = colby_celltype_horizontal,
+              colby_celltype_vertical = colby_celltype_vertical))
+}
+
+plot_list <- plot_scCODA_sig_lollipop_facet(allsccoda, point_size = 3, errorbar_linewidth = 0.6)
+print(plot_list$p_horizontal)
+print(plot_list$p_vertical)
+print(plot_list$colby_groups_horizontal)
+print(plot_list$colby_groups_vertical)
+print(plot_list$colby_celltype_horizontal)
+print(plot_list$colby_celltype_vertical)
 
 #####7 ----Marker gene bubble-----
 library(Seurat)
@@ -587,20 +860,24 @@ PlotMultiDotPlot <- function(seu, gene_categories, color_vec){
   return(list(plot_list = plot_list, combined = out_plot))
 }
 gene_categories <- list(
-  c("CD4","SELL","CCR7","LEF1"),
-  c("CD8A","CD8B"),
+  c("CD4","SELL","CCR7","TCF7"),
+  c("CD8A","CD8B","CCR7","LEF1"),
   c("CD14","S100A8","S100A9"),
-  c("TCL1A","CD19","IGHM","IGHD"),
-  c("NKG7","GZMB","KLRD1"),
-  c("CD8A","CD8B","GZMK","GZMH"),
+  c("IGHD","TCL1A","IL4R"),
+  c("NKG7","KLRF1","KLRD1"),
+  c("CD8A","CD8B","GZMA","GZMB","GZMH"),
+  c("AQP3","TSHZ2","CD40LG","IL7R"),
+  c("TRGC1","TRGC2","CXCR6"),
   c("FOXP3","IL2RA","IKZF2"),
+  c("FCRL5","FCRL2","CD24","TNFRSF13B","CD80","IGHG3"),
   c("PF4","PPBP","ITGA2B"),
-  c("GPR183","TNFRSF13B","CD24"), 
-  c("TRGC1", "TRGC2","CXCR6"),
-  c("HBB","HBA1","HBA2"),
   c("FCGR3A","MS4A7","LST1"),
+  c("HBB","HBA2","HBA1"),
   c("PLD4","IL3RA","IRF7"),
   c("JCHAIN","XBP1","MZB1"))
+
+
+library(RColorBrewer)
 col2 <- colorRampPalette(c("#BEBEBE",brewer.pal(9,"YlGnBu")))(100)[1:85]
 bubble_res <- PlotMultiDotPlot(pbmc1, gene_categories = gene_categories, color_vec = col2)
 bubble_res$combined
