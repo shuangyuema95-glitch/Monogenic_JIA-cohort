@@ -1,7 +1,7 @@
 library(ggplot2)
 library(openxlsx)
 library(tidyverse)
-metainfo<-read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
+metainfo<-read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx");dim(metainfo)
 country_df <- metainfo %>%
   count(country, name = "n") %>%
   mutate(percent = n / sum(n) * 100)
@@ -37,21 +37,22 @@ print(p_sex)
 
 table(sex_ration)
 #Female-to-male ratio
-15/18
+17/19
 
 ######sup  pathway prop pie
 pathway_col<-c(
   "NFKB"="#B3D1E7",
-  "Inflammasome"="#6699CC",
+  "Inflammasome"="#B07A99",
   "Immune metabolism"="#847AB3",
-  "Interferon"="#EC706E",
-  "Cell death"="#FEC260",
+  "Interferon regulation"="#EC706E",
+  "IECD"="#FEC260",
   "Uncategoried"="#EBB1A4")
 
 
 pathway_df <- metainfo %>% count(pathway, name = "n") %>% mutate(percent = n / sum(n) * 100) %>% arrange(desc(percent))
 pathway_df$pathway<-factor(pathway_df$pathway,levels = pathway_df$pathway)
 p_pathway<-ggplot(pathway_df,aes(x="",y=n,fill=pathway))+geom_bar(stat="identity",width=1,linewidth=0.5)+coord_polar("y",start=0)+geom_text(aes(label=paste0(round(percent,1),"%")),position=position_stack(vjust=0.5),colour="black",size=4.2)+scale_fill_manual(values=pathway_col)+theme_void()+theme(legend.title=element_blank(),legend.text=element_text(size=11,colour="black"),plot.title=element_text(hjust=0.5,size=14,colour="black"))
+table(metainfo$pathway)/nrow(metainfo)
 
 library(patchwork)
 p_country|p_sex|p_pathway
@@ -60,31 +61,26 @@ p_country|p_sex|p_pathway
 ######3 Bar plot for mutation type, novel or reported and genotype
 library(tidyverse)
 library(patchwork)
-
-plot_meta_bar <- function(metainfo, target_col, fill_color = "#847AB3", bar_width = 0.7){
-  split_vec <- metainfo[[target_col]] %>%
-    str_split("/") %>%
-    unlist() %>%
-    str_trim()
+plot_meta_bar <- function(metainfo, target_col, fill_color ="#6699CC", 
+                  bar_width = 0.6) {
+  metainfo1<-metainfo[!is.na(metainfo[[target_col]]),]
+  split_vec <- metainfo1[[target_col]] %>%
+    str_split("/") %>% unlist() %>% str_trim()
   cnt <- tibble(val = split_vec) %>%
     count(val) %>%
     mutate(total = sum(n), percent = n / total * 100) %>%
     arrange(desc(percent))
   cnt$val <- factor(cnt$val, levels = cnt$val)
-  
   p <- ggplot(cnt, aes(x = val, y = percent)) +
     geom_col(fill = fill_color, width = bar_width) +
-    geom_text(aes(label = round(percent, 1)), vjust = -0.25, size = 3.5, colour = "black") +
+    geom_text(aes(label = round(percent, 2)), vjust = -0.25, size = 3.5, colour = "black") +
     scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
-    theme_bw() +
+    theme_classic() +
     theme(
-      panel.grid = element_blank(),
       axis.text.x = element_text(colour = "black", angle = 45, hjust = 1),
       axis.ticks.x = element_line(colour = "black"),
       axis.text.y = element_text(colour = "black"),
       axis.ticks.y = element_line(colour = "black"),
-      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-      axis.line = element_blank(),
       axis.title.x = element_blank(),
       axis.title.y = element_text(colour = "black")
     ) +
@@ -93,12 +89,46 @@ plot_meta_bar <- function(metainfo, target_col, fill_color = "#847AB3", bar_widt
 }
 
 p_mut <- plot_meta_bar(metainfo, "MUT")
-p_geno <- plot_meta_bar(metainfo, "genotype")+theme(axis.title.y = element_blank())
-p_novel <- plot_meta_bar(metainfo, "novel")+theme(axis.title.y = element_blank())
-p_acmg<-plot_meta_bar(metainfo,"ACMG_class")+theme(axis.title.y = element_blank())
+p_geno <- plot_meta_bar(metainfo, "genotype") + theme(axis.title.y = element_blank())
+p_novel <- plot_meta_bar(metainfo, "novel") + theme(axis.title.y = element_blank())
+p_acmg <- plot_meta_bar(metainfo, "ACMG_class") + theme(axis.title.y = element_blank())
+p_mecha <- plot_meta_bar(metainfo, "mechanism") + theme(axis.title.y = element_blank())
 
-p_mut|p_geno|p_novel|p_acmg
+p_mut | p_geno | p_novel | p_mecha |p_acmg
 
+table(metainfo$MUT)
+
+# Frameshift Frameshift/Missense 
+# 4                   1 
+# Large deletion            Missense 
+# 1                  18 
+# Missense/Frameshift   Missense/Missense 
+# 3                   2 
+# Nonsense Nonsense/Frameshift 
+# 5                   1 
+# Splicing 
+# 1 
+
+
+# table(split_vec)
+# split_vec
+# Frameshift Large deletion       Missense 
+# 9              1             26 
+# Nonsense       Splicing 
+# 6              1 
+
+# table(metainfo$novel)
+# 
+# novel variant novel variant in known site 
+# 4                           2 
+# reported           reported/reported 
+# 24                           6 
+# table(  split_vec)
+# split_vec
+# novel variant novel variant in known site 
+# 4                           2 
+# reported 
+# 36 
 
 ##check
 MUT1<-c()
@@ -209,14 +239,11 @@ distri_age <- function(gene_colors, abline_lwd = 0.4, point_size = 3, text_size 
   }
   wrap_plots(plot_list, ncol=3) + plot_layout(guides="collect") & theme(legend.position="bottom")
 }
-
 my_colors <- c("#0B71AB","#6699CC","#B3D1E7","#5C6BC0","#A992C0","#C8BBD5",
                "#FFEFC1","#FEC260","#F49D5C","#C95968","#EBB1A4","#8C2522",
                "#96AF95","#008280")
 distri_age(gene_colors = my_colors, abline_lwd = 0.5, point_size = 3, text_size = 2.8)
-
-
-####median and IQR age for three groups
+##(a)median and IQR age for three groups
 calc_age_stats <- function() {
   library(openxlsx); library(dplyr)
   metainfo <- read.xlsx("0903_Clean case.xlsx")
@@ -243,7 +270,7 @@ calc_age_stats <- function() {
 age_stats <- calc_age_stats()
 print(age_stats)
 
-####forest and IQR age ， foreset plot
+####(2)forest and IQR age ， foreset plot
 plot_age_forest_both <- function(onset_color, diag_color, point_size=3.5, line_width=0.6, vline_width=0.4) {
   library(openxlsx); library(ggplot2); library(dplyr); library(patchwork)
   metainfo <- read.xlsx("0903_Clean case.xlsx")
@@ -299,7 +326,7 @@ res$horizontal
 res$stats
 res$delay
 
-####check the proportion of patients with diagnosed age larger than onset
+##(a) check the proportion of patients with diagnosed age larger than onset
 calc_delay_ratio <- function() {
   library(openxlsx); library(dplyr)
   metainfo <- read.xlsx("0903_Clean case.xlsx")
@@ -324,8 +351,7 @@ calc_delay_ratio <- function() {
 delay_ratio <- calc_delay_ratio()
 print(delay_ratio)
 
-
-#####(2) density plots
+#####(3) density plots
 distri_age_sex <- function(male_col = "#0072B2", female_col = "#AF478A",
                            med_male_col = "#003D81", med_female_col = "#8C2522",
                            med_overall_col = "#333333", med_lwd = 0.7,
@@ -414,8 +440,302 @@ age_density3plots<-distri_age_sex(
   med_lwd=0.7, line_w=0.8, fill_alpha=0.25, text_size=2.8)
 age_density3plots
 
-###### gene count for all mutations
-###### Function
+##(a) check median onset age
+Clinical_data<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
+age_data<-Clinical_data[
+Clinical_data$Number%in%c("Sex","Age of onset (year)","Age of diagnosis (year)"),]
+rownames(age_data)<-age_data$Number
+age_data<-age_data[,-c(1,2)]
+age_data<-as.data.frame(t(age_data))
+age_data$`Age of onset (year)`<-as.numeric(gsub("y","",age_data$`Age of onset (year)`))
+age_data$`Age of diagnosis (year)`<-as.numeric(gsub("y","",age_data$`Age of diagnosis (year)`))
+age_data$`Age of delay (year)`<-age_data$`Age of diagnosis (year)`-age_data$`Age of onset (year)`
+
+median(age_data[age_data$Sex=="female","Age of onset (year)"])#2
+median(age_data[age_data$Sex=="male","Age of onset (year)"])#2.085
+median(age_data$`Age of onset (year)`)#2 
+
+##(b) check  three wilcoxon test P value
+age_check <- age_data[!is.na(age_data$`Age of onset (year)`), ]
+age_check$Sex <- tolower(trimws(age_check$Sex))
+kw_check <- list(
+  onset = kruskal.test(`Age of onset (year)` ~ Sex, data = age_check),
+  diag  = kruskal.test(`Age of diagnosis (year)` ~ Sex, data = age_check),
+  delay = kruskal.test(`Age of delay (year)` ~ Sex, data = age_check)
+)
+cat("Kruskal-Wallis p -- onset:", round(kw_check$onset$p.value,4),
+    " diag:", round(kw_check$diag$p.value,4),
+    " delay:", round(kw_check$delay$p.value,4), "\n")
+
+
+####(4) scatter with age value and median, IQR,  group with genes and mechanism
+metainfo <- read.xlsx("0903_Clean case.xlsx")
+metainfo$ID <- trimws(metainfo$ID)
+metainfo$gene <- toupper(trimws(metainfo$gene))
+metainfo$mechanism <- tolower(trimws(metainfo$mechanism))
+metainfo$mechanism[is.na(metainfo$mechanism)|metainfo$mechanism==""] <- "na"
+
+clin <- read.xlsx("code\\Clinical data.xlsx", colNames=FALSE)
+pids <- trimws(as.character(clin[1, 3:ncol(clin)]))
+extr <- function(x) { x <- trimws(as.character(x)); x[grepl("not available|^$|^na$",x,ignore.case=TRUE)] <- NA; as.numeric(gsub("[^0-9.]","",x)) }
+age_df <- data.frame(ID=pids,
+                     onset=extr(clin[grep("onset",clin[,1],ignore.case=TRUE)[1], 3:ncol(clin)]),
+                     diag =extr(clin[grep("diagnosis",clin[,1],ignore.case=TRUE)[1], 3:ncol(clin)]),
+                     stringsAsFactors=FALSE)
+age_df$delay <- age_df$diag - age_df$onset
+
+df <- merge(metainfo[,c("ID","gene","mechanism")], age_df, by="ID", all.x=TRUE)
+df <- df[!is.na(df$onset), ]
+cat("Patients:", nrow(df), "\n")
+print(sort(table(df$gene)))
+
+plot_gene_age <- function(data, age_col, ylab, ybreaks,
+                          point_color = "#6699CC", bar_color = "#BB0021",
+                          point_size = 1.5, bar_width = 0.4, bar_lwd = 0.5,
+                          mech_colors = c("deficiency"="#6699CC",
+                                          "gain-of-function"="#FEC260",
+                                          "haploinsufficiency"="#AF478A",
+                                          "na"="black")) {
+  d <- data[!is.na(data[[age_col]]), ]
+  norm_p <- shapiro.test(d[[age_col]])$p.value
+  kw_p <- kruskal.test(d[[age_col]] ~ d$gene)$p.value
+  cat("Normality P =", round(norm_p,4), "| Kruskal-Wallis P =", round(kw_p,4), "\n")
+  gs <- d %>% group_by(gene) %>%
+    summarise(median_age=median(.data[[age_col]]),
+              q1=quantile(.data[[age_col]],0.25),
+              q3=quantile(.data[[age_col]],0.75), .groups="drop") %>%
+    arrange(median_age)
+  gs$mech <- sapply(gs$gene, function(g) unique(d$mechanism[d$gene==g])[1])
+  gs$lab_col <- mech_colors[gs$mech]
+  gs$lab_col[is.na(gs$lab_col)] <- "black"
+  print(gs)
+  d$gene <- factor(d$gene, levels=gs$gene)
+  gs$gene <- factor(gs$gene, levels=gs$gene)
+  ggplot(d, aes(x=gene, y=.data[[age_col]])) +
+    geom_point(color=point_color, size=point_size) +
+    geom_errorbar(data=gs, aes(y=median_age, ymin=q1, ymax=q3), color=bar_color, width=bar_width, linewidth=bar_lwd) +
+    geom_point(data=gs, aes(y=median_age), color=bar_color, size=2, shape=16) +
+    scale_y_continuous(breaks=ybreaks, expand=expansion(mult=c(0.05,0.1))) +
+    theme_classic() +
+    xlab(NULL) + ylab(ylab) +
+    theme(axis.text=element_text(color="black", size=10),
+          axis.text.x=element_text(angle=45, hjust=1, size=10, colour=gs$lab_col),
+          axis.title=element_text(color="black"))
+}
+
+plot_gene_age_mech <- function(data, age_col, ylab, ybreaks,
+                               point_color = "#6699CC", bar_color = "#BB0021",
+                               point_size = 1.5, bar_width = 0.4, bar_lwd = 0.5,
+                               mech_order = c("na","gain-of-function","haploinsufficiency","deficiency")) {
+  d <- data[!is.na(data[[age_col]]), ]
+  norm_p <- shapiro.test(d[[age_col]])$p.value
+  kw_p <- kruskal.test(d[[age_col]] ~ d$gene)$p.value
+  cat("Normality P =", round(norm_p,4), "| Kruskal-Wallis P =", round(kw_p,4), "\n")
+  gs <- d %>% group_by(gene) %>%
+    summarise(n=n(), median_age=median(.data[[age_col]]),
+              q1=quantile(.data[[age_col]],0.25),
+              q3=quantile(.data[[age_col]],0.75), .groups="drop")
+  gs$mech <- sapply(gs$gene, function(g) unique(d$mechanism[d$gene==g])[1])
+  gs$mech[is.na(gs$mech)] <- "na"
+  gs$mech <- factor(gs$mech, levels=mech_order)
+  gs <- gs %>% arrange(mech, median_age)
+  print(gs)
+  d$gene <- factor(d$gene, levels=gs$gene)
+  gs$gene <- factor(gs$gene, levels=gs$gene)
+  ge <- gs[gs$n >= 2, ]
+  p <- ggplot(d, aes(x=gene, y=.data[[age_col]])) +
+    geom_point(color=point_color, size=point_size) +
+    scale_y_continuous(breaks=ybreaks, expand=expansion(mult=c(0.05,0.1))) +
+    theme_classic() +
+    xlab(NULL) + ylab(ylab) +
+    theme(axis.text=element_text(color="black", size=10),
+          axis.text.x=element_text(angle=45, hjust=1, size=10),
+          axis.title=element_text(color="black"))
+  if (nrow(ge) > 0)
+    p <- p +
+    geom_errorbar(data=ge, aes(y=median_age, ymin=q1, ymax=q3), color=bar_color, width=bar_width, linewidth=bar_lwd) +
+    geom_point(data=ge, aes(y=median_age), color=bar_color, size=2, shape=16)
+  p
+}
+
+plot_gene_age_combo <- function(data, age_col, ylab, ybreaks,
+                                point_color = "#6699CC", bar_color = "#BB0021",
+                                point_size = 1.5, bar_width = 0.4, bar_lwd = 0.5,
+                                mech_colors = c("deficiency"="#6699CC",
+                                                "gain-of-function"="#FEC260",
+                                                "haploinsufficiency"="#AF478A",
+                                                "na"="black"),
+                                mech_order = c("gain-of-function","haploinsufficiency","deficiency"),
+                                left_width = 0.9, right_width = 0.4,
+                                jitter_w = 0.15, seed = 42) {
+  d <- data[!is.na(data[[age_col]]), ]
+  norm_p <- shapiro.test(d[[age_col]])$p.value
+  kw_p <- kruskal.test(d[[age_col]] ~ d$gene)$p.value
+  cat("Normality P =", round(norm_p,4), "| Kruskal-Wallis P =", round(kw_p,4), "\n")
+  gs <- d %>% group_by(gene) %>%
+    summarise(n=n(), median_age=median(.data[[age_col]]),
+              q1=quantile(.data[[age_col]],0.25),
+              q3=quantile(.data[[age_col]],0.75), .groups="drop")
+  gs$mech <- sapply(gs$gene, function(g) unique(d$mechanism[d$gene==g])[1])
+  gs$mech[is.na(gs$mech)] <- "na"
+  gs$mech <- factor(gs$mech, levels=c("na", mech_order))
+  gs <- gs %>% arrange(mech, median_age)
+  print(gs)
+  d$gene <- factor(d$gene, levels=gs$gene)
+  gs$gene <- factor(gs$gene, levels=gs$gene)
+  ge <- gs[gs$n >= 2, ]
+  p_left <- ggplot(d, aes(x=gene, y=.data[[age_col]])) +
+    geom_point(color=point_color, size=point_size) +
+    scale_y_continuous(breaks=ybreaks, expand=expansion(mult=c(0.05,0.1))) +
+    theme_classic() +
+    xlab(NULL) + ylab(ylab) +
+    theme(axis.text=element_text(color="black", size=10),
+          axis.text.x=element_text(angle=45, hjust=1, size=10),
+          axis.title=element_text(color="black"))
+  if (nrow(ge) > 0)
+    p_left <- p_left +
+    geom_errorbar(data=ge, aes(y=median_age, ymin=q1, ymax=q3), color=bar_color, width=bar_width, linewidth=bar_lwd) +
+    geom_point(data=ge, aes(y=median_age), color=bar_color, size=2, shape=16)
+  dm <- d[d$mechanism %in% mech_order, ]
+  dm$mechanism <- factor(dm$mechanism, levels=mech_order)
+  ms <- dm %>% group_by(mechanism) %>%
+    summarise(n=n(), median_age=median(.data[[age_col]]),
+              q1=quantile(.data[[age_col]],0.25),
+              q3=quantile(.data[[age_col]],0.75), .groups="drop")
+  print(ms)
+  p_right <- ggplot(dm, aes(x=mechanism, y=.data[[age_col]])) +
+    geom_point(aes(color=mechanism), size=point_size,
+               position=position_jitter(width=jitter_w, height=0, seed=seed)) +
+    geom_errorbar(data=ms, aes(y=median_age, ymin=q1, ymax=q3), color=bar_color, width=bar_width*0.5, linewidth=bar_lwd) +
+    geom_point(data=ms, aes(y=median_age), color=bar_color, size=2, shape=16) +
+    scale_color_manual(values=mech_colors[mech_order]) +
+    scale_y_continuous(breaks=ybreaks, expand=expansion(mult=c(0.05,0.1))) +
+    theme_classic() +
+    xlab(NULL) + ylab(NULL) +
+    theme(axis.text=element_text(color="black", size=10),
+          axis.text.x=element_text(angle=45, hjust=1, size=10),
+          axis.title=element_text(color="black"),
+          legend.position="none")
+  p_left + p_right + plot_layout(widths=c(left_width, right_width))
+}
+
+age_onset_plot  <- plot_gene_age(df, "onset", "Age at onset", c(0,2,6,10,15,20))
+age_delay_plot  <- plot_gene_age(df, "delay", "Diagnostic delay", seq(0,35,5))
+age_onset_plot2 <- plot_gene_age_mech(df, "onset", "Age at onset", c(0,2,6,10,15,20))
+age_delay_plot2 <- plot_gene_age_mech(df, "delay", "Diagnostic delay", seq(0,35,5))
+age_onset_combo <- plot_gene_age_combo(df, "onset", "Age at onset", c(0,2,6,10,15,20))
+age_delay_combo <- plot_gene_age_combo(df, "delay", "Diagnostic delay", seq(0,35,5))
+age_onset_plot
+age_delay_plot
+age_onset_plot2
+age_delay_plot2
+age_onset_combo/age_delay_combo
+
+
+##(a) check and output for manuscript
+Clinical_data<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
+age_data<-Clinical_data[
+  Clinical_data$Number%in%c("Sex","Age of onset (year)","Age of diagnosis (year)"),]
+rownames(age_data)<-age_data$Number
+age_data<-age_data[,-c(1,2)]
+age_data<-as.data.frame(t(age_data))
+age_data$`Age of onset (year)`<-as.numeric(gsub("y","",age_data$`Age of onset (year)`))
+age_data$`Age of diagnosis (year)`<-as.numeric(gsub("y","",age_data$`Age of diagnosis (year)`))
+age_data$`Age of delay (year)`<-age_data$`Age of diagnosis (year)`-age_data$`Age of onset (year)`
+
+age_data$mechanism<-metainfo[match(rownames(age_data),metainfo$ID),'mechanism']
+age_data$gene<-metainfo[match(rownames(age_data),metainfo$ID),'gene']
+
+
+summarize_age_stats <- function(data, age_col,
+                                mech_order = c("gain-of-function","haploinsufficiency","deficiency")) {
+  library(dplyr)
+  d <- data[!is.na(data[[age_col]]) & !is.na(data$gene), ]
+  gs <- d %>% group_by(gene) %>%
+    summarise(n=n(),
+              median=median(.data[[age_col]]),
+              q1=quantile(.data[[age_col]],0.25),
+              q3=quantile(.data[[age_col]],0.75),
+              .groups="drop") %>%
+    mutate(iqr=q3-q1)
+  gs[gs$n==1, c("q1","q3","iqr")] <- NA
+  gs <- gs %>% arrange(desc(n), median)
+  dm <- d[!is.na(d$mechanism) & trimws(d$mechanism)!="" & tolower(trimws(d$mechanism))!="na", ]
+  dm$mechanism <- tolower(trimws(dm$mechanism))
+  ms <- dm %>% group_by(mechanism) %>%
+    summarise(n=n(),
+              median=median(.data[[age_col]]),
+              q1=quantile(.data[[age_col]],0.25),
+              q3=quantile(.data[[age_col]],0.75),
+              .groups="drop") %>%
+    mutate(iqr=q3-q1)
+  lev <- intersect(c(mech_order, "na"), unique(ms$mechanism))
+  lev <- c(lev, setdiff(unique(ms$mechanism), lev))
+  ms$mechanism <- factor(ms$mechanism, levels=lev)
+  ms <- ms %>% arrange(mechanism)
+  comps <- combn(unique(as.character(ms$mechanism)), 2, simplify=FALSE)
+  wt <- do.call(rbind, lapply(comps, function(pr){
+    a <- dm[[age_col]][dm$mechanism==pr[1]]
+    b <- dm[[age_col]][dm$mechanism==pr[2]]
+    pw <- tryCatch(wilcox.test(a,b)$p.value, error=function(e) NA)
+    data.frame(group1=pr[1], group2=pr[2], n1=length(a), n2=length(b), p_wilcox=pw)
+  }))
+  wt$p_signif <- ifelse(is.na(wt$p_wilcox), "ns",
+                        ifelse(wt$p_wilcox<0.001,"***",
+                               ifelse(wt$p_wilcox<0.01,"**",
+                                      ifelse(wt$p_wilcox<0.05,"*","ns"))))
+  cat("\n-- by gene --\n"); print(as.data.frame(gs), digits=7)
+  cat("\n-- by mechanism --\n"); print(as.data.frame(ms), digits=7)
+  cat("\n-- pairwise wilcoxon --\n"); print(as.data.frame(wt), digits=7)
+  return(list(gene_stats=gs, mech_stats=ms, wilcox=wt))
+}
+
+
+onset_stats  <- summarize_age_stats(age_data, "Age of onset (year)")
+##check again
+median(age_data[age_data$mechanism=="gain-of-function"&!is.na(age_data$mechanism),'Age of onset (year)'])
+median(age_data[age_data$mechanism=="haploinsufficiency"&!is.na(age_data$mechanism),'Age of onset (year)'])
+median(age_data[age_data$mechanism=="deficiency"&!is.na(age_data$mechanism),'Age of onset (year)'])
+quantile(age_data[age_data$mechanism=="gain-of-function"&!is.na(age_data$mechanism),'Age of onset (year)'])
+quantile(age_data[age_data$mechanism=="haploinsufficiency"&!is.na(age_data$mechanism),'Age of onset (year)'])
+quantile(age_data[age_data$mechanism=="deficiency"&!is.na(age_data$mechanism),'Age of onset (year)'])
+
+delay_stats  <- summarize_age_stats(age_data, "Age of delay (year)")
+##check again
+median(age_data[age_data$mechanism=="gain-of-function"&!is.na(age_data$mechanism),'Age of delay (year)'])
+median(age_data[age_data$mechanism=="haploinsufficiency"&!is.na(age_data$mechanism),'Age of delay (year)'])
+median(age_data[age_data$mechanism=="deficiency"&!is.na(age_data$mechanism),'Age of delay (year)'])
+quantile(age_data[age_data$mechanism=="gain-of-function"&!is.na(age_data$mechanism),'Age of delay (year)'])
+quantile(age_data[age_data$mechanism=="haploinsufficiency"&!is.na(age_data$mechanism),'Age of delay (year)'])
+quantile(age_data[age_data$mechanism=="deficiency"&!is.na(age_data$mechanism),'Age of delay (year)'])
+
+
+write_age_stats_xlsx <- function(onset_res, delay_res, file = "age_stats_summary.xlsx"){
+  library(openxlsx)
+  wb <- createWorkbook()
+  addWorksheet(wb, "onset")
+  addWorksheet(wb, "delay")
+  write_block <- function(sheet, label, df, startRow){
+    writeData(wb, sheet, label, startRow = startRow)
+    writeData(wb, sheet, df, startRow = startRow + 1)
+    startRow + 1 + nrow(df) + 1
+  }
+  r <- 1
+  r <- write_block("onset", "by gene", as.data.frame(onset_res$gene_stats), r)
+  r <- write_block("onset", "by mechanism", as.data.frame(onset_res$mech_stats), r)
+  write_block("onset", "pairwise wilcoxon", as.data.frame(onset_res$wilcox), r)
+  r <- 1
+  r <- write_block("delay", "by gene", as.data.frame(delay_res$gene_stats), r)
+  r <- write_block("delay", "by mechanism", as.data.frame(delay_res$mech_stats), r)
+  write_block("delay", "pairwise wilcoxon", as.data.frame(delay_res$wilcox), r)
+  saveWorkbook(wb, file, overwrite = TRUE)
+  cat("saved:", file, "\n")
+}
+
+write_age_stats_xlsx(onset_stats, delay_stats)
+
+###### gene count for all mutations from previous cases and this study
+##(1) filter with domain
 library(openxlsx); library(ggplot2); library(dplyr); library(patchwork)
 genemeta <- read.xlsx("C:/Users/Administrator/Desktop/15个基因已发表突变中是JIA 表型的搜集/score_meta.xlsx")
 f <- c("Autosomal recessive" = "#6699CC",
@@ -454,7 +774,48 @@ plot_gene_bar <- function(genemeta,
 p <- plot_gene_bar(genemeta)
 p
 
+##(2) no filter, using this
+plot_gene_bar <- function(genemeta,
+                          inher_colors = c("Autosomal recessive" = "#6699CC",
+                                           "autosomal dominant"   = "#FEC260",
+                                           "X-linked recessive"   = "#AF478A")) {
+  library(ggplot2); library(dplyr)
+  gene_n <- genemeta %>% count(Gene, name = "n")
+  inherit_df <- genemeta %>%
+    group_by(Gene) %>% summarise(Inheriance = unique(Inheriance)[1], .groups = "drop") %>%
+    left_join(gene_n, by = "Gene")
+  inherit_df$Inheriance <- factor(inherit_df$Inheriance,
+                                  levels = c("autosomal dominant", "Autosomal recessive", "X-linked recessive"))
+  inherit_df <- inherit_df %>% arrange(Inheriance, desc(n))
+  inherit_df$Gene <- factor(inherit_df$Gene, levels = inherit_df$Gene)
+  inherit_df$pct <- inherit_df$n / sum(inherit_df$n)
+  inherit_df$label <- paste0(round(inherit_df$pct * 100, 2), "%")
+  p <- ggplot(inherit_df, aes(x = Gene, y = pct)) +
+    geom_col(aes(fill = Inheriance), width = 0.48, color = NA) +
+    geom_text(aes(label = label), vjust = -0.5, size = 3, color = "black") +
+    scale_y_continuous(labels = scales::percent, expand = expansion(mult = c(0, 0.08))) +
+    scale_fill_manual(values = inher_colors) +
+    facet_grid(~ Inheriance, scales = "free_x", space = "free_x") +
+    labs(x = "", y = "Percentage") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black"),
+          axis.text.y = element_text(color = "black"),
+          strip.text = element_text(face = "bold"),
+          panel.grid = element_blank(),
+          legend.position = "none")
+  return(p)
+}
+p <- plot_gene_bar(genemeta)
+p
+##check
+prop <- table(genemeta$Gene) / sum(table(genemeta$Gene))
+sort(round(prop, 4), decreasing = TRUE) 
+sum(round(prop, 4))                     
+sum(prop)                                
+
+
 ######6 gene domain for all mutations. Donut plots
+####(1) Donut for each gene
 library(openxlsx); library(ggplot2); library(dplyr); library(patchwork)
 genemeta <- read.xlsx("C:/Users/Administrator/Desktop/15个基因已发表突变中是JIA 表型的搜集/score_meta.xlsx")
 genemeta <- genemeta[!genemeta$Domain %in% c("\\","NA","") & !is.na(genemeta$Domain), ]
@@ -500,6 +861,65 @@ for(g in gene_order){
 }
 p <- wrap_plots(plot_list, nrow = 3, ncol = 5)
 p
+
+####(2) Merge all domains of all genes at one bubble plot
+library(ggplot2); library(dplyr);library(openxlsx)
+genemeta<-read.xlsx("C:\\Users\\Administrator\\Desktop\\15个基因已发表突变中是JIA 表型的搜集\\score_meta.xlsx")
+AR  <- c("ADA2","LACC1","MVK","LPIN2")
+AD  <- c("TNFRSF1A","NLRP3","COPA","NOD2","PSTPIP1","UNC93B1","TNFAIP3","RAC2","SOCS1")
+XLR <- c("ELF4","XIAP")
+mech_colors <- c("AR"="#6699CC", "AD"="#FEC260", "XLR"="#AF478A")
+mech_order <- c("AR","AD","XLR")
+
+
+plot_gene_domain_dot <- function(genemeta,
+                                 mech_colors = c("AR"="#6699CC","AD"="#FEC260","XLR"="#AF478A"),
+                                 mech_order = c("AR","AD","XLR"),
+                                 square = FALSE, show_pct = FALSE){
+  gm <- genemeta[!is.na(genemeta$Domain) & !genemeta$Domain %in% c("\\","NA",""), ]
+  gm$Domain_short <- gsub(" domain", "", gm$Domain, ignore.case = TRUE)
+  mech_of <- function(g) factor(ifelse(g %in% AR, "AR", ifelse(g %in% AD, "AD", "XLR")), levels = mech_order)
+  gn <- gm %>% count(Gene, name = "n"); gn$mech <- mech_of(gn$Gene)
+  gene_order <- gn %>% arrange(mech, desc(n)) %>% pull(Gene)
+  df <- gm %>% count(Gene, Domain_short, name = "n") %>% group_by(Gene) %>% mutate(prop = n/sum(n)) %>% ungroup()
+  df$Gene <- factor(df$Gene, levels = gene_order)
+  df <- df %>% arrange(Gene, desc(n))
+  df$dom_id <- factor(paste0(as.character(df$Gene), "_", df$Domain_short),
+                      levels = unique(paste0(as.character(df$Gene), "_", df$Domain_short)))
+  df$mech <- mech_of(df$Gene)
+  dom_lab <- setNames(as.character(df$Domain_short), as.character(df$dom_id))
+  block_bounds <- df %>% group_by(Gene) %>% summarise(xmax = max(as.numeric(dom_id)) + 0.5, .groups = "drop")
+  mech_sep <- gn %>% group_by(mech) %>% summarise(ymax = max(as.numeric(factor(Gene, levels = gene_order))) + 0.5, .groups = "drop") %>% pull(ymax)
+  mech_sep <- mech_sep[-length(mech_sep)]
+  p <- ggplot(df, aes(x = dom_id, y = Gene))
+  if(square){
+    p <- p + geom_point(aes(size = prop, fill = mech), shape = 22, color = "white", linewidth = 0.3, alpha = 0.9)
+  } else {
+    p <- p + geom_point(aes(size = prop, color = mech), alpha = 0.85)
+  }
+  if(show_pct)
+    p <- p + geom_text(aes(label = paste0(round(prop*100, 1), "%")), size = 2.5, color = "black")
+  p <- p +
+    scale_x_discrete(labels = dom_lab) +
+    geom_vline(data = block_bounds, aes(xintercept = xmax), linetype = "dashed", color = "grey60", linewidth = 0.3) +
+    geom_hline(yintercept = mech_sep, linetype = "solid", color = "grey20", linewidth = 0.5) +
+    labs(x = NULL, y = NULL) +
+    theme_classic() +
+    theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6),
+          panel.grid.major.y = element_line(colour = "grey90", linewidth = 0.25, linetype = "dashed"),
+          axis.text.x = element_text(angle = 45, hjust = 1, color = "black"),
+          axis.text.y = element_text(color = "black"),
+          legend.title = element_blank())
+  p <- p + scale_size_area(max_size = 8, labels = scales::percent)
+  if(square){
+    p <- p + scale_fill_manual(values = mech_colors)
+  } else {
+    p <- p + scale_color_manual(values = mech_colors)
+  }
+  return(p)
+}
+p_dot <- plot_gene_domain_dot(genemeta); print(p_dot)
+p_sq  <- plot_gene_domain_dot(genemeta, square = TRUE); print(p_sq)
 
 ######7 CADD and frequency
 library(openxlsx); library(ggplot2); library(dplyr); library(patchwork)
