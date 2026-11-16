@@ -618,12 +618,22 @@ row.names = FALSE,fileEncoding = "UTF-8")
 
 ##(a) Compare for three groups
 library(tidyverse)
-sccoda_hm<-read.csv("./CellPreprocess/0827scCODA_mono_vs_HC.csv")
-sccoda_hp<-read.csv("./CellPreprocess/0827scCODA_poly_vs_HC.csv")
-sccoda_pm<-read.csv("./CellPreprocess/0827scCODA_mono_vs_poly.csv")
-allsccoda<-do.call("rbind",list(sccoda_hm,sccoda_hp,sccoda_pm))
-allsccoda<-allsccoda[allsccoda$Significant=="True",]
+#sccoda_hm<-read.csv("./CellPreprocess/0827scCODA_mono_vs_HC.csv")
+#sccoda_hp<-read.csv("./CellPreprocess/0827scCODA_poly_vs_HC.csv")
+#sccoda_pm<-read.csv("./CellPreprocess/0827scCODA_mono_vs_poly.csv")
+#allsccoda<-do.call("rbind",list(sccoda_hm,sccoda_hp,sccoda_pm))
+#allsccoda<-allsccoda[allsccoda$Significant=="True",]
 
+sp_hc   <- read_csv("./CellPreprocess/scCODA_pathway_vs_HC.csv", show_col_types = FALSE)
+sp_poly <- read_csv("./CellPreprocess/scCODA_pathway_vs_poly.csv", show_col_types = FALSE)
+sp_ph   <- read_csv("./CellPreprocess/scCODA_poly_vs_HC.csv", show_col_types = FALSE)
+
+allsccoda <- bind_rows(sp_hc, sp_poly, sp_ph) %>%
+  filter(!`Cell Type` %in% c("Erythrocyte", "Platelet")) %>%
+  filter(`Inclusion probability` >= 0.6) %>%
+  rename(Cell.Type = `Cell Type`, HDI.3. = `HDI 3%`, HDI.97. = `HDI 97%`)
+
+                                           
 allsccoda$Contrast<-factor(allsccoda$Contrast,levels=c("polygenic_vs_HC","monogenic_vs_HC","monogenic_vs_polygenic"))
 contrast_col<-c("polygenic_vs_HC"="#FEC260","monogenic_vs_HC"="#AF478A","monogenic_vs_polygenic"="#6699CC")
 
