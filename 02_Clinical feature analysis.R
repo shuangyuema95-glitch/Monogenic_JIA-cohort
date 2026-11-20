@@ -89,7 +89,7 @@ pheno_prop
 pheno_prop <- pheno_prop[order(-pheno_prop$Percentage), ]
 pheno_prop$System <- factor(pheno_prop$System, levels = rev(pheno_prop$System))
 prop_bar<-ggplot(pheno_prop, aes(x = System, y = Percentage)) +
-  geom_col(fill = "#847AB3", width = 0.7) +
+  geom_col(fill = "#6699CC", width = 0.7) +
   geom_text(aes(label = paste0(Percentage, "%"), y = Percentage + 2), size = 3, color = "black") +
   coord_flip() +
   scale_y_continuous(expand = c(0, 0), limits = c(0, 105)) +
@@ -125,6 +125,8 @@ ggplot(pheno_prop, aes(x = "", y = Percentage, fill = System)) +
 ######2 system prop group by  pathway
 clinidata<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
 metainfo<-read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
+metainfo<-metainfo[!metainfo$ID%in%c("P3","P16","P28"),]
+
 as.character(as.matrix(clinidata[2,3:35]))->x1
 metainfo$gene->x2
 identical(x1,x2)
@@ -285,6 +287,9 @@ grep("/", features_prop$fea, value = TRUE)
 ######4 gene-phenotype heatmap,grouped by genes
 clinidata<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
 metainfo<-read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
+metainfo<-metainfo[!metainfo$ID%in%c("P3","P16","P28"),]
+unique(metainfo$ID)
+
 grep("ystem",unique(clinidata$Number),value = T)
 unique(as.character(as.matrix(clinidata[13:84,3:ncol(clinidata)])))#92-13+1=80
 sysdata<-clinidata[clinidata$Number%in%grep("ystem",unique(clinidata$Number),value = T),]
@@ -293,7 +298,7 @@ dim(sysdata)#72 35
 gene <- c("ADA2","LACC1","ELF4","XIAP","MVK","LPIN2","NLRP3","NOD2",
                 "PSTPIP1","RAC2","COPA","UNC93B1","SOCS1","TNFAIP3")
 pathways<-c("NFKB","Inflammasome","Uncategoried","Immune metabolism",
-            "Cell death","Interferon")
+            "IECD","Interferon regulation")
 
 L0<-list()
 for(i in 1:length(pathways)){
@@ -468,3 +473,107 @@ res <- plot_pheno_heatmap(syslist, metainfo, sysdata, sys_order, pw_order, ann_c
 res$block
 res$stack_plot
 View(res$prop_table)
+
+######5 gene-phenotype heatmap,grouped by patients
+plot_pheno_heatmap_by_patient <- function(clin_path, sys_order,
+                                          pat_cols = NULL,
+                                          ann_colors = NULL,
+                                          delay_mode = c("bin", "continuous"),
+                                          delay_breaks = c(0, 0.25, 1, 3, 5, Inf),
+                                          delay_labels = c("<=0.25y", "0.25-1y", "1-3y", "3-5y", ">=5y"),
+                                          delay_pal = c("#F7F7F7", "#FFEFC1", "#FEC260", "#F1BAAB", "#EC706E"),
+                                          sex_pal = c(male = "#6699CC", female = "#EC706E"),
+                                          color_present = "#BB0021", color_absent = "gray90",
+                                          color_na = "grey45", border_color = "white",
+                                          drop_empty_feature = TRUE, annotate_system = TRUE,
+                                          cluster_cols = FALSE,
+                                          cellheight = 8.3, cellwidth = 11.5) {
+  library(openxlsx); library(pheatmap)
+  delay_mode <- match.arg(delay_mode)
+  
+  clin <- read.xlsx(clin_path, colNames = TRUE)
+  clin$Number_ID <- trimws(clin$Number_ID)
+  if (is.null(pat_cols)) pat_cols <- grep("^P\\d+$", colnames(clin), value = TRUE)
+  pat_cols <- pat_cols[order(as.integer(sub("^P", "", pat_cols)))]
+  
+  sys_list <- grep("ystem", unique(clin$Number), value = TRUE)
+  feat <- clin[clin$Number %in% sys_list, c("Number", "Number_ID", pat_cols)]
+  feat$Number_ID <- trimws(feat$Number_ID)
+  
+  vals <- as.matrix(feat[, pat_cols])
+  mat <- matrix(NA_real_, nrow(vals), ncol(vals), dimnames = list(feat$Number_ID, pat_cols))
+  mat[vals == "yes"] <- 1
+  mat[vals == "no"]  <- 0
+  mat <- t(mat)
+  
+  if (drop_empty_feature) mat <- mat[, colSums(mat == 1, na.rm = TRUE) > 0, drop = FALSE]
+  
+  feat_df <- data.frame(feature = feat$Number_ID, system = feat$Number, stringsAsFactors = FALSE)
+  rownames(feat_df) <- feat$Number_ID
+  feat_df <- feat_df[colnames(mat), , drop = FALSE]
+  feat_df$system <- factor(feat_df$system, levels = sys_order)
+  feat_df <- feat_df[order(feat_df$system, seq_len(nrow(feat_df))), , drop = FALSE]
+  mat <- mat[, rownames(feat_df), drop = FALSE]
+  
+  tab <- table(feat_df$system); tab <- tab[tab > 0]
+  gaps_col <- if (length(tab) > 1) cumsum(tab)[-length(tab)] else NULL
+  
+  get_row <- function(lab) {
+    v <- clin[clin$Number_ID == lab, pat_cols]
+    if (nrow(v) == 0) return(rep(NA_character_, length(pat_cols)))
+    as.character(unlist(v))
+  }
+  to_num <- function(v) suppressWarnings(as.numeric(gsub("[^0-9.]", "", v)))
+  sex   <- get_row("Sex")
+  onset <- to_num(get_row("Age of onset (year)"))
+  dx    <- to_num(get_row("Age of diagnosis (year)"))
+  delay <- as.numeric(ifelse(is.na(onset) | is.na(dx), NA_real_, dx - onset))
+  
+  if (delay_mode == "bin") {
+    delay_var <- cut(delay, breaks = delay_breaks, labels = delay_labels,
+                     right = FALSE, include.lowest = TRUE)
+    delay_cols <- setNames(delay_pal, delay_labels)
+  } else {
+    delay_var <- delay
+    delay_cols <- delay_pal
+  }
+  
+  ann_row <- data.frame(Sex = factor(sex, levels = names(sex_pal)),
+                        "Diagnostic delay" = delay_var,
+                        row.names = pat_cols, check.names = FALSE)
+  ann_row <- ann_row[pat_cols, , drop = FALSE]
+  mat <- mat[pat_cols, , drop = FALSE]
+  
+  ann_col <- if (annotate_system) data.frame(System = feat_df$system, row.names = rownames(feat_df)) else NULL
+  
+  if (is.null(ann_colors)) {
+    ann_colors <- list(Sex = sex_pal, "Diagnostic delay" = delay_cols)
+    if (annotate_system) ann_colors$System <- c(
+      "Growth and musculoskeletal system" = "#B5BBE3", "Systemic Manifestations" = "#0B71AB",
+      "Cutaneous-Mucosal system" = "#EC706E", "Immune system" = "#847AB3",
+      "Digestive system" = "#86C7B4", "Hepatosplenic system" = "#F1BAAB",
+      "Endocrine system" = "#D9C2D9", "Respiratory system" = "#FFEFC1",
+      "Nervous system" = "#FEC260", "Hematologic system" = "#9CD2ED",
+      "Cardiovascular system" = "#AF478A", "Urinary system" = "#CBDAA9")
+  }
+  
+  p <- pheatmap(mat,
+                cluster_rows = FALSE, cluster_cols = cluster_cols,
+                gaps_col = gaps_col,
+                color = colorRampPalette(c(color_absent, color_present))(100),
+                na_col = color_na,
+                annotation_row = ann_row, annotation_col = ann_col,
+                annotation_colors = ann_colors,
+                annotation_legend = TRUE, border_color = border_color,
+                fontsize_row = 9, fontsize_col = 6,
+                cellheight = cellheight, cellwidth = cellwidth)
+  
+  list(plot = p, mat = mat, ann_row = ann_row, ann_col = ann_col,
+       feature_order = feat_df, gaps_col = gaps_col)
+}
+
+res_pat <- plot_pheno_heatmap_by_patient(
+  clin_path = "E:/Cohort PPT/JIA/code/Clinical data.xlsx",
+  sys_order = sys_order, delay_mode = "bin")
+res_pat$plot
+
