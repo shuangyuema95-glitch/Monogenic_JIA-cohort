@@ -183,6 +183,7 @@ ggplot(df, aes(x = rel, y = pathway, fill = group)) +
   labs(x = "Relative information flow", y = NULL)
 
 ######7 differentially network (each group: polygenic and 5 gene mutations VS HC)
+library(ggplotify)
 celltype_levels <- c("Naive CD4 T","Memory CD4 T",
                      "Naive CD8 T","NK","Treg","Cytotoxic CD8 T",
                      "γδT","Naive B","Memory B","Plasma","CD14 Monocyte",
@@ -202,6 +203,46 @@ plist_diff <- lapply(seq_along(chat_list)[-1], function(i) {
 names(plist_diff) <- paste0(names(chat_list)[-1], "_vs_HC")
 wrap_plots(plist_diff, ncol = 3)
 
+####revised as cell colors
+library(ggplotify)
+
+celltype_levels <- c("Naive CD4 T","Memory CD4 T",
+                     "Naive CD8 T","NK","Treg","Cytotoxic CD8 T",
+                     "γδT","Naive B","Memory B","Plasma","CD14 Monocyte",
+                     "CD16 Monocyte","pDC","Platelet","Erythrocyte")
+cell_color_vec <- c("#847AB3","#96AF95","#6699CC","#86C7B4","#007ABA","#9CD2ED",
+                    "#F1BAAB","#BB0021","#D9C2D9","#FEC260","#AF478A",
+                    "#EC706E","#B5BBE3","#E2A9C9","#CBDAA9")
+color_ct2 <- setNames(cell_color_vec, celltype_levels)[ct_keep]
+
+netVisual_diffInteraction_sender <- function() {
+  fn <- netVisual_diffInteraction
+  bd <- deparse(body(fn))
+  i1 <- grep("E\\(g\\)\\$color <- ifelse", bd)
+  if (!length(i1)) stop("edge-color ifelse line not found")
+  i1 <- i1[1]
+  i2 <- grep("color\\.edge\\[2\\]\\)", bd)
+  i2 <- i2[i2 >= i1]
+  if (!length(i2)) stop("closing color.edge[2]) line not found")
+  i2 <- i2[1]
+  bd[i1:i2] <- c(
+    "es <- igraph::get.edgelist(g, names = FALSE)",
+    "igraph::E(g)$color <- grDevices::adjustcolor(igraph::V(g)$color[es[,1]], alpha.edge)")
+  body(fn) <- parse(text = paste(bd, collapse = "\n"))[[1]]
+  fn
+}
+diff_sender <- netVisual_diffInteraction_sender()
+
+plist_diff <- lapply(seq_along(chat_list)[-1], function(i) {
+  nm <- paste0(names(chat_list)[i], " vs HC")
+  as.ggplot(function() diff_sender(
+    chat_merge, comparison = c(1, i), measure = "weight", weight.scale = TRUE,
+    color.use = color_ct2, title.name = nm,
+    vertex.weight = 6, vertex.size.max = 5, vertex.label.cex = 0.75,
+    edge.width.max = 5, edge.curved = 0.2))
+})
+names(plist_diff) <- paste0(names(chat_list)[-1], "_vs_HC")
+wrap_plots(plist_diff, ncol = 3)
 
 ######8 circors plot focused on immune pathway based on stacked result form above analysis for each group, seperately
 sel <- c("MHC-I","MHC-II","ICAM","ITGB2","SELPLG","CD99","LCK","CCL","CLEC","GALECTIN","IFN-II","ADGRE5","TNF","IL1")
@@ -316,15 +357,11 @@ edge_num <- function(g, path = "IL1", s = "pDC", t = c("CD14 Monocyte","CD16 Mon
 do.call(rbind, lapply(names(chat_list), edge_num))
 
 ###change part 9 as the function
-library(igraph)
-library(ggraph)
-library(patchwork)
+library(Seurat); library(CellChat); library(dplyr); library(patchwork); library(circlize); library(future)
+setwd("E:\\Cohort PPT\\JIA\\code\\CellCom")
 
-##### CONFIG (already defined in your CC environment)
-# ct_keep, color_ct2, lab_full, chat_list are expected to exist in the environment
 ct_keep <- c("Naive CD4 T","Memory CD4 T","Naive CD8 T","NK","Treg","Cytotoxic CD8 T",
              "γδT","Naive B","Memory B","Plasma","CD14 Monocyte","CD16 Monocyte","pDC")
-
 celltype_levels <- c("Naive CD4 T", "Memory CD4 T", "Naive CD8 T", "NK", "Treg",
                      "Cytotoxic CD8 T", "γδT", "Naive B", "Memory B", "Plasma",
                      "CD14 Monocyte", "CD16 Monocyte", "pDC", "Platelet", "Erythrocyte")
@@ -362,7 +399,6 @@ print(names(chat_list))
 print(sapply(chat_list, nrow))
 chat_merge<-readRDS("JIA_cellchat_mutation7_merge.RDS")
 
-##### BIPARTITE NET: SINGLE PATHWAY x SINGLE CHAT OBJECT
 bipartite_net <- function(cc, path = NULL, ct = ct_keep, q = 0.90, ttl = NULL) {
   if (is.null(path)) {
     m <- cc@net$weight
@@ -417,18 +453,16 @@ bipartite_grid <- function(chat_list, pathways, groups = names(chat_list),
       if (!is.null(p)) plots[[length(plots) + 1]] <- p
     }
   }
-  wrap_plots(plots, nrow = length(groups))
+  wrap_plots(plots, nrow = 1,byrow = F)
 }
 
-##### CALL EXAMPLE
 pg <- bipartite_grid(
   chat_list = chat_list,
-  pathways  = c("IFN-II", "IL1"),
+  pathways  = c("IL1"),
   groups    = short_lab,
-  lab_full  = lab_full
-)
+  lab_full  = lab_full)
 pg
-
+ 
 ####9.1 revised
 library(igraph)
 library(ggraph)
