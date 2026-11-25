@@ -264,8 +264,6 @@ r_il1$row
 
 
 
-
-
 #View(treat)
 # filter(treat,Stage=="Maximum disease activity")->data1
 # colnames(data1)[c(5:16,19)]
@@ -322,6 +320,7 @@ colnames(treat) <- make.names(colnames(treat))
 metainfo <- read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
 colnames(metainfo) <- make.names(colnames(metainfo))
 
+###(1) version 1, merge targeted and non-targetd therapies into one plot
 plot_bubble <- function(stage = "Maximum disease activity",
                         label = TRUE,
                         drug_cols = c("Anti-TNF", "Anti-IL-1", "Anti-IL-6", "JAK inhibitors",
@@ -422,6 +421,123 @@ for (stg in stages) {
 }
 
 (res_all[["Maximum disease activity"]]$circle+theme(legend.position = "none"))|res_all[["Max response"]]$circle
+
+###(2) version 2, split targeted and non-targetd therapies as two plots
+plot_bubble_split <- function(stage = "Maximum disease activity",
+                              label = TRUE,
+                              drug_grp1 = c("Anti-TNF", "Anti-IL-1", "Anti-IL-6", "JAK inhibitors",
+                                            "B-cell targeted therapy"),
+                              drug_grp2 = c("Conventional synthetic DMARDs (csDMARDs)",
+                                            "Glucocorticoids",
+                                            "Non steroidal Anti-Inflammatory Drugs (NSAIDs)"),
+                              drug_labs = c("Anti-TNF", "Anti-IL-1", "Anti-IL-6", "JAK inhibitors",
+                                            "B-cell", "csDMARDs", "Glucocorticoids", "NSAIDs"),
+                              group_order = c("Inflammasome", "NFKB", "Interferon regulation",
+                                              "Immune metabolism", "IECD", "Uncategoried"),
+                              fill_cols = NULL,
+                              low_col = "#6699CC", high_col = "#DF5734",
+                              max_size = 11, text_size = 2.5,
+                              amplify = TRUE, free_fill = FALSE,
+                              shape = c("circle", "square"),
+                              layout = c("horizontal", "vertical"),
+                              widths = c(1, 1), heights = c(1, 1)) {
+  library(dplyr); library(tidyr); library(ggplot2); library(patchwork)
+  shape <- match.arg(shape)
+  layout <- match.arg(layout)
+  shp <- if (shape == "circle") 16 else 15
+  
+  drug_all <- make.names(c(drug_grp1, drug_grp2))
+  lab_map <- setNames(drug_labs, drug_all)
+  out_col <- grep("Response", colnames(treat), value = TRUE)[1]
+  
+  data1 <- treat[treat$Stage == stage, ]
+  data1$Number <- trimws(as.character(data1$Number))
+  data1$gene <- toupper(trimws(as.character(metainfo$gene[match(data1$Number, metainfo$ID)])))
+  data1$pathway <- as.character(metainfo$pathway[match(data1$Number, metainfo$ID)])
+  
+  long <- data1 %>%
+    filter(!is.na(.data[[out_col]]) & .data[[out_col]] != "unknown") %>%
+    pivot_longer(all_of(drug_all), names_to = "class", values_to = "drug") %>%
+    filter(!is.na(drug) & trimws(drug) != "unused" & !is.na(gene) & !is.na(pathway))
+  
+  bubble_df <- long %>%
+    group_by(gene, pathway, class) %>%
+    summarise(total = n(),
+              eff = (sum(.data[[out_col]] == "Complete response") +
+                       0.5 * sum(.data[[out_col]] == "Partial response")) / n(),
+              .groups = "drop") %>%
+    mutate(eff_pct = round(eff * 100, 1)) %>%
+    filter(total > 0)
+  
+  bubble_df$pathway <- factor(bubble_df$pathway,
+                              levels = intersect(group_order, unique(bubble_df$pathway)))
+  bubble_df <- bubble_df %>%
+    group_by(pathway) %>%
+    mutate(gene = factor(gene, levels = rev(sort(as.character(unique(gene)))))) %>%
+    ungroup()
+  
+  g_max <- max(bubble_df$total)
+  
+  th <- theme(panel.grid.minor = element_blank(),
+              panel.grid.major = element_line(color = "gray90"),
+              panel.grid.major.y = element_line(linetype = "dashed"),
+              panel.grid.major.x = element_line(linetype = "dotted"),
+              panel.border = element_rect(color = "black", linewidth = 0.5),
+              strip.background = element_blank(),
+              strip.text = element_text(face = "bold", hjust = 0, size = 7),
+              axis.text.x = element_text(angle = 45, hjust = 1, color = "black"),
+              axis.text.y = element_text(color = "black", face = "italic"),
+              axis.ticks = element_line(color = "black"))
+  
+  mk <- function(grp) {
+    d <- bubble_df[bubble_df$class %in% make.names(grp), ]
+    d$class <- factor(lab_map[as.character(d$class)], levels = unname(lab_map[make.names(grp)]))
+    if (nrow(d) == 0) return(ggplot() + theme_void())
+    
+    lb <- max(d$total)
+    mult <- if (amplify) g_max / lb else 1
+    d$sz_val <- d$total * mult
+    tb <- sort(unique(d$total))
+    
+    sz <- scale_size_area(max_size = max_size, limits = c(0, g_max),
+                          breaks = tb * mult, labels = as.character(tb),
+                          name = "Total Treated (n)")
+    
+    fsrc <- if (free_fill) d else bubble_df
+    fl <- if (free_fill) range(fsrc$eff_pct) else c(0, 100)
+    fs <- if (is.null(fill_cols)) scale_colour_gradient(low = low_col, high = high_col, limits = fl)
+    else scale_colour_gradientn(colours = fill_cols, limits = fl)
+    
+    p <- ggplot(d, aes(x = class, y = gene)) +
+      geom_point(aes(size = sz_val, colour = eff_pct), shape = shp) +
+      fs + sz +
+      facet_grid(pathway ~ ., scales = "free_y", space = "fixed") +
+      labs(x = NULL, y = NULL) + theme_bw() + th
+    if (label) p <- p + geom_text(aes(label = eff_pct), size = text_size)
+    p
+  }
+  
+  p1 <- mk(drug_grp1)
+  p2 <- mk(drug_grp2)
+  combo <- if (layout == "horizontal") {
+    (p1 + theme(legend.position = "right")) | (p2 + theme(legend.position = "right"))
+  } else {
+    (p1 + theme(legend.position = "right")) / (p2 + theme(legend.position = "right"))
+  }
+  
+  list(grp1 = p1, grp2 = p2, combo = combo,
+       data = bubble_df, data_grp1 = bubble_df[bubble_df$class %in% make.names(drug_grp1), ],
+       data_grp2 = bubble_df[bubble_df$class %in% make.names(drug_grp2), ])
+}
+
+cols_list <- list(p1 = colorRampPalette(c("#6699CC", "#DF5734"))(101))
+res_split <- list()
+for (stg in c("Maximum disease activity", "Max response")) {
+  res_split[[stg]] <- plot_bubble_split(stage = stg, fill_cols = cols_list$p1, label = TRUE)
+}
+#res_split[["Maximum disease activity"]]$combo
+res_split[["Max response"]]$combo
+
 
 
 ######4 upset plots for combined therapies and line plot for disease  activity score 
@@ -695,7 +811,10 @@ data.frame(Stage = stages, n = sapply(sk_all, function(x) nrow(x$data)))
 
 sk_all[["Maximum disease activity"]]$pathway$plot
 sk_all[["Maximum disease activity"]]$gene$plot
-sk_all[["Maximum disease activity"]]$four$plot
+p1<-sk_all[["Maximum disease activity"]]$four$plot
 sk_all[["Max response"]]$pathway$plot
 sk_all[["Max response"]]$gene$plot
-sk_all[["Max response"]]$four$plot
+p2<-sk_all[["Max response"]]$four$plot
+
+library(patchwork)
+p1/p2
