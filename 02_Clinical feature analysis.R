@@ -1,652 +1,830 @@
+###treatment analysis
+## 8-10 non-response, 4-7 partial response; 0-3 complete response
+
+
+######1 effective drug count (proportion )
 library(ggplot2)
 library(openxlsx)
-library(tidyverse)
-
-
-clinidata<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
-grep("ystem",unique(clinidata$Number),value = T)
-unique(as.character(as.matrix(clinidata[13:84,3:ncol(clinidata)])))#87-13+1=75
-
-######1 system prop
-sysdata<-clinidata[clinidata$Number%in%grep("ystem",unique(clinidata$Number),value = T),]
-dim(sysdata)#72 35
-colnames(sysdata)
-exist<-data.frame()
-alle<-data.frame()
-pt_cols <- grep("^P\\d+$", colnames(sysdata), value = TRUE)
-for(pt in pt_cols){
-  allP<-sysdata[,c("Number",pt)]
-  yes_sys<-unique(allP[allP[,2]=="yes",'Number'])
-  eval_sys<-unique(allP[allP[,2]!="not available",'Number'])
-  sys<-data.frame(value=unique(grep("ystem",unique(clinidata$Number),value = T)))
-  sys$count<-ifelse(sys$value%in%yes_sys,1,0)
-  sys1<-as.data.frame((t(sys)))
-  colnames(sys1)<-sys1['value',]
-  sys1<-sys1[-1,]
-  exist<-rbind(exist,sys1)
-  sys2<-data.frame(value=unique(grep("ystem",unique(clinidata$Number),value = T)))
-  sys2$count<-ifelse(sys2$value%in%eval_sys,1,0)
-  sys2<-as.data.frame((t(sys2)))
-  colnames(sys2)<-sys2['value',]
-  sys2<-sys2[-1,]
-  alle<-rbind(alle,sys2)
+treat <- read.xlsx("E:\\Cohort PPT\\JIA\\code\\treatment data.xlsx")
+eff <- treat$Effective.Medications.During.Treatment
+all_effdrugs <- c()
+for(i in 1:length(eff)){
+  all_effdrugs <- c(all_effdrugs, trimws(unlist(strsplit(eff[i], split = ","))))
 }
-exist1<-as.data.frame(apply(exist,2,as.numeric))
-alle1<-as.data.frame(apply(alle,2,as.numeric))
-rownames(exist1)<-pt_cols
-rownames(alle1)<-pt_cols
-pheno_prop <- data.frame(
-  System = colnames(exist1),
-  Positive_n = colSums(exist1),
-  Evaluated_n = colSums(alle1),
-  Percentage = round(colSums(exist1)/colSums(alle1)*100, 2)
-)
-pheno_prop
-
-#####(1) check again for this analysis, Clinical system involvement (IBD list style)
-library(readxl)
-clinidata <- read.xlsx("E:/Cohort PPT/JIA/code/clinical data.xlsx")
-pt_cols <- grep("^P\\d+$", colnames(clinidata), value = TRUE)
-sys_list <- grep("ystem", unique(clinidata$Number), value = TRUE)
-clin <- clinidata[clinidata$Number %in% sys_list, c("Number","Number_ID",pt_cols)]
-clin$System <- NA
-cur <- NA
-for(k in 1:nrow(clin)){
-  if(clin$Number[k] %in% sys_list) cur <- clin$Number[k]
-  clin$System[k] <- cur
-}
-system_map <- list()
-for(s in sys_list){
-  system_map[[s]] <- clin$Number_ID[clin$System == s]
-}
-mat <- as.matrix(clin[, pt_cols])
-rownames(mat) <- clin$Number_ID
-T_pM <- as.data.frame(t(mat), stringsAsFactors = FALSE)
-reSys <- list(); allSys <- list()
-for(i in 1:nrow(T_pM)){
-  allP <- unlist(T_pM[i, ])
-  yesP <- names(allP[allP == "yes"])
-  res <- unlist(lapply(system_map, function(x) length(intersect(x, yesP))))
-  res[res != 0] <- 1
-  reSys[[i]] <- res
-  al <- sapply(system_map, function(phe_set){
-    any(allP[phe_set] != "not available")
-  })
-  allSys[[i]] <- as.integer(al)
-}
-reSys <- do.call("rbind", reSys)
-allSys <- do.call("rbind", allSys)
-colnames(allSys) <- names(system_map)
-pheno_prop <- data.frame(
-  System = names(colSums(reSys)),
-  Positive_n = colSums(reSys),
-  Evaluated_n = colSums(allSys),
-  Percentage = round(colSums(reSys)/colSums(allSys)*100, 2)
-)
-pheno_prop
-
-#####(2) total prop bar
-pheno_prop <- pheno_prop[order(-pheno_prop$Percentage), ]
-pheno_prop$System <- factor(pheno_prop$System, levels = rev(pheno_prop$System))
-prop_bar<-ggplot(pheno_prop, aes(x = System, y = Percentage)) +
-  geom_col(fill = "#6699CC", width = 0.7) +
-  geom_text(aes(label = paste0(Percentage, "%"), y = Percentage + 2), size = 3, color = "black") +
-  coord_flip() +
-  scale_y_continuous(expand = c(0, 0), limits = c(0, 105)) +
-  labs(x = "", y = "Percentage (%)") +
-  theme_classic() +
-  theme(axis.text = element_text(color = "black", size = 8))
-
-prop_bar
-
-#####(3)Pie chart for total proportion
-pheno_prop <- pheno_prop[order(-pheno_prop$Percentage), ]
-color_vec <- c("#847AB3","#6699CC","#86C7B4","#007ABA","#9CD2ED",
-               "#F1BAAB","#BB0021","#D9C2D9","#FEC260","#AF478A",
-               "#EC706E","#B5BBE3","#E2A9C9","#CBDAA9")
-pheno_prop$color <- color_vec[1:nrow(pheno_prop)]
-pheno_prop$label <- paste0(pheno_prop$System, " (", pheno_prop$Percentage, "%)")
-pheno_prop$System <- factor(pheno_prop$System, levels = pheno_prop$System)
-ggplot(pheno_prop, aes(x = "", y = Percentage, fill = System)) +
-  geom_col(width = 1, color = NA) +
-  coord_polar(theta = "y") +
-  geom_text(aes(label = paste0(Percentage, "%"),
-                y = Percentage/2 + cumsum(c(0, head(Percentage, -1)))),
-            size = 3, color = "white") +
-  scale_fill_manual(values = setNames(pheno_prop$color, pheno_prop$System),
-                    breaks = pheno_prop$System,
-                    labels = pheno_prop$label) +
-  theme_void() +
-  theme(legend.title = element_blank(),
-        legend.text = element_text(size = 8, color = "black"))
+all_effdrugs <- all_effdrugs[!all_effdrugs %in% "no"]
+sort(round(table(all_effdrugs)/(sum(table(all_effdrugs))),3),decreasing = T)
 
 
+drug_class <- list("Antibiotics" = c("Penicillin", "Cephalosporins", "Carbapenems", "Macrolides", "Quinolones", "Glycopeptides"),
+  "Non steroidal Anti-Inflammatory Drugs (NSAIDs)" = c("Ibuprofen", "Naproxen", "Diclofenac", "Indomethacin", "Celecoxib"),
+  "Glucocorticoids" = c("Prednisolone", "Methylprednisolone", "Dexamethasone"),
+  "Conventional synthetic DMARDs (csDMARDs)" = c("Methotrexate (MTX)", "Sulfasalazine", "Cyclosporine", "Azathioprine", "Cyclophosphamide", "Hydroxychloroquine (HCQ)", "Mycophenolate mofetil (MMF)"),
+  "Anti-TNF" = c("Etanercept", "Adalimumab", "Infliximab", "Golimumab"),
+  "Anti-IL-1" = c("Anakinra", "Canakinumab", "Firsekibart"),
+  "Anti-IL-6" = c("Tocilizumab"),
+  "B-cell targeted therapy" = c("Rituximab", "Belimumab"),
+  "JAK inhibitors" = c("Tofacitinib", "Baricitinib", "Ruxolitinib", "Upadacitinib"),
+  "Colchicine" = "Colchicine",
+  "Immunomodulators" = "Thalidomide",
+  "Others" = c("Intravenous immunoglobulin", "Growth hormone", "Vitamin D", "Furosemide", "Plasma exchange", "Antibiotics"))
 
-######2 system prop group by  pathway
-clinidata<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
-metainfo<-read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
-metainfo<-metainfo[!metainfo$ID%in%c("P3","P16","P28"),]
 
-as.character(as.matrix(clinidata[2,3:35]))->x1
-metainfo$gene->x2
-identical(x1,x2)
+map_df <- data.frame(drug = unlist(drug_class, use.names = FALSE), class = rep(names(drug_class), lengths(drug_class)))
+eff_tab <- as.data.frame(table(all_effdrugs), stringsAsFactors = FALSE)
+colnames(eff_tab) <- c("drug", "n")
+eff_tab$class <- map_df$class[match(eff_tab$drug, map_df$drug)]
+eff_tab$drug_prop <- round(eff_tab$n / sum(eff_tab$n), 4)
+class_n <- tapply(eff_tab$n, eff_tab$class, sum)
+eff_tab$class_prop <- round(class_n[eff_tab$class] / sum(eff_tab$n), 4)
+eff_tab <- eff_tab[order(eff_tab$n, decreasing = TRUE), ]
+eff_tab
 
-as.data.frame(t(data.frame(c("category","pathway",metainfo$pathway))))->y1
-colnames(y1)<-colnames(clinidata)
-clinidata2<-rbind(clinidata,y1)
-dim(clinidata2)
-rownames(clinidata2)[86]<-86 # more 1 than clinical data
-
-Count_prop<-function(sysdata){
-  exist<-data.frame()
-  alle<-data.frame()
-  pt_cols <- grep("^P\\d+$", colnames(sysdata), value = TRUE)
-  for(pt in pt_cols){
-    allP<-sysdata[,c("Number",pt)]
-    yes_sys<-unique(allP[allP[,2]=="yes",'Number'])
-    eval_sys<-unique(allP[allP[,2]!="not available",'Number'])
-    sys<-data.frame(value=unique(grep("ystem",unique(clinidata$Number),value = T)))
-    sys$count<-ifelse(sys$value%in%yes_sys,1,0)
-    sys1<-as.data.frame((t(sys)))
-    colnames(sys1)<-sys1['value',]
-    sys1<-sys1[-1,]
-    exist<-rbind(exist,sys1)
-    sys2<-data.frame(value=unique(grep("ystem",unique(clinidata$Number),value = T)))
-    sys2$count<-ifelse(sys2$value%in%eval_sys,1,0)
-    sys2<-as.data.frame((t(sys2)))
-    colnames(sys2)<-sys2['value',]
-    sys2<-sys2[-1,]
-    alle<-rbind(alle,sys2)
-  }
-  exist1<-as.data.frame(apply(exist,2,as.numeric))
-  alle1<-as.data.frame(apply(alle,2,as.numeric))
-  rownames(exist1)<-pt_cols
-  rownames(alle1)<-pt_cols
-  pheno_prop <- data.frame(
-    System = colnames(exist1),
-    Positive_n = colSums(exist1),
-    Evaluated_n = colSums(alle1),
-    Percentage = round(colSums(exist1)/colSums(alle1)*100, 2)
-  )
-  return(pheno_prop)
-}
-pathways<-unique(as.character(as.matrix(clinidata2[86,3:35])))
-
-pathway_sysprop<-data.frame()
-for(i in 1:length(pathways)){
-  index1<-pathways[i]
-  grep(index1,clinidata2[86,])->colindex
-  sysdata1<-clinidata2[clinidata2$Number%in%grep("ystem",unique(clinidata2$Number),value = T),
-                       c(1,2,colindex)]
-  path1prop<-Count_prop(sysdata1)
-  path1prop$pathway<-index1
+library(ggplot2)
+plot_drug_bar <- function(data, drug_class = NULL, bar_width = 0.7, color = "#6699CC") {
+  if (is.data.frame(data)) df <- data.frame(drug = as.character(data[[1]]), n = as.numeric(data[[2]]), stringsAsFactors = FALSE)
+  else if (!is.null(names(data))) df <- data.frame(drug = names(data), n = as.numeric(data), stringsAsFactors = FALSE)
+  else { df <- as.data.frame(table(data), stringsAsFactors = FALSE); colnames(df) <- c("drug", "n") }
+  df <- df[df$drug != "no" & df$n > 0, ]
+  if (is.data.frame(data) && ncol(data) >= 3) df$class <- as.character(data[[3]])
+  else if (!is.null(drug_class)) df$class <- rep(names(drug_class), lengths(drug_class))[match(df$drug, unlist(drug_class, use.names = FALSE))]
+  if (any(is.na(df$class))) stop("unmapped drugs found")
+  df$pct <- round(df$n / sum(df$n) * 100, 2)
+  class_n <- tapply(df$n, df$class, sum)
+  class_pct <- round(class_n / sum(df$n) * 100, 2)
+  df$class_pct <- class_pct[df$class]
   
-  pathway_sysprop<-rbind(pathway_sysprop,path1prop)
-}
-View(pathway_sysprop)
-#####(1) check again for this analysis,  by pathway
-pathway_row <- clinidata2[86, ]
-pt_cols <- grep("^P\\d+$", colnames(clinidata2), value = TRUE)
-pt_pathway <- setNames(unlist(pathway_row[, pt_cols]), pt_cols)
-pathways <- unique(pt_pathway)
-sys_list <- grep("ystem", unique(clinidata2$Number), value = TRUE)
-pheno_by_pathway <- data.frame()
-for(pw in pathways){
-  pts_pw <- names(pt_pathway[pt_pathway == pw])
-  exist_pw <- exist1[pts_pw, , drop = FALSE]
-  alle_pw <- alle1[pts_pw, , drop = FALSE]
-  tmp <- data.frame(
-    Pathway = pw,
-    System = colnames(exist_pw),
-    Positive_n = colSums(exist_pw),
-    Evaluated_n = colSums(alle_pw),
-    n_patients = length(pts_pw)
-  )
-  tmp$Percentage <- round(tmp$Positive_n / tmp$Evaluated_n * 100, 2)
-  pheno_by_pathway <- rbind(pheno_by_pathway, tmp)
-}
-View(pheno_by_pathway)
-identical(pheno_by_pathway$Percentage,pathway_sysprop$Percentage)
-
-write.table(pheno_by_pathway, "E:/Cohort PPT/JIA/code/CellPreprocess/clinical_3d.txt",
-            sep = "\t", row.names = FALSE, quote = FALSE)
-
-#####(2) go to python and plot 3D bar
-top3 <- pheno_by_pathway %>%
-  group_by(Pathway) %>%
-  arrange(desc(Percentage), .by_group = TRUE) %>%
-  slice_head(n = 3) %>%
-  as.data.frame()
-top3
-
-View(top3)
-##save result
-save(pheno_by_pathway,pheno_prop,file="E://Cohort PPT//JIA//code//Phenotype_prop.Rdata")
-
-
-######3 feature proportion for each feature
-sysorder<-c(pheno_prop%>%arrange(desc(Percentage))%>%pull(System))
-
-sysorder<-c("Growth and musculoskeletal system",
-"Systemic Manifestations","Cutaneous-Mucosal system",
-"Immune system","Digestive system",
-"Hepatosplenic system",
-"Endocrine system",
-"Respiratory system",
-"Nervous system",
-"Hematologic system",
-"Cardiovascular system","Urinary system")
-
-clinidata<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
-grep("ystem",unique(clinidata$Number),value = T)
-sysdata<-clinidata[clinidata$Number%in%grep("ystem",unique(clinidata$Number),value = T),]
-dim(sysdata)#79 35
-colnames(sysdata)
-
-features_prop<-data.frame()
-for(i in 1:nrow(sysdata)){
-  features<-as.character(as.matrix(sysdata[i,3:ncol(sysdata)]))
-  total<-sum(features!="not available")
-  present<-sum(features=="yes")
-  ratio<-present/total
-  features_prop<-rbind(features_prop,c(as.character(as.matrix(sysdata[i,1:2])),round(ratio,2)))
-}
-colnames(features_prop)<-c("sys","fea","ratio")
-features_prop$ratio<-round(as.numeric(features_prop$ratio),2)
-
-as.numeric(which(apply(sysdata,1,function(x){sum(x[3:length(x)]=="yes")})==0))->index
-sysdata$Number_ID[index]#25
-dim(features_prop[features_prop$ratio==0,])#25
-
-features_prop$fea <- trimws(features_prop$fea)
-features_prop$fea <- gsub("’", "'", features_prop$fea)
-features_prop$fea <- sapply(features_prop$fea, function(x) {
-  s <- tolower(x)
-  substr(s, 1, 1) <- toupper(substr(s, 1, 1))
-  s
-})
-features_prop$sys <- factor(features_prop$sys, levels = sysorder)
-features_prop <- features_prop[order(features_prop$sys, -features_prop$ratio), ]
-features_prop$fea <- factor(features_prop$fea, levels = unique(features_prop$fea[order(features_prop$sys, -features_prop$ratio)]))
-
-feature_prop <- ggplot(features_prop[features_prop$ratio!=0,], aes(x = fea, y = ratio)) +
-  geom_col(fill = "#847AB3", width = 0.7) +
-  scale_y_continuous(expand = c(0, 0), labels = scales::percent) +
-  facet_grid(. ~ sys, scales = "free_x", space = "free_x") +
-  theme_classic() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 7),
-        axis.text.y = element_text(color = "black", size = 7),
-        axis.ticks = element_line(color = "black"),
-        axis.line = element_line(color = "black"),
-        strip.background = element_blank(),
-        strip.text = element_text(color = "black", size = 8)) +
-  labs(x = "", y = "Proportion (%)")
-feature_prop
-grep("/", features_prop$fea, value = TRUE)
-
-######4 gene-phenotype heatmap,grouped by genes
-clinidata<-read.xlsx("E:\\Cohort PPT\\JIA\\code\\Clinical data.xlsx")
-metainfo<-read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
-metainfo<-metainfo[!metainfo$ID%in%c("P3","P16","P28"),]
-unique(metainfo$ID)
-
-grep("ystem",unique(clinidata$Number),value = T)
-unique(as.character(as.matrix(clinidata[13:84,3:ncol(clinidata)])))#92-13+1=80
-sysdata<-clinidata[clinidata$Number%in%grep("ystem",unique(clinidata$Number),value = T),]
-dim(sysdata)#72 35
-
-gene <- c("ADA2","LACC1","ELF4","XIAP","MVK","LPIN2","NLRP3","NOD2",
-                "PSTPIP1","RAC2","COPA","UNC93B1","SOCS1","TNFAIP3")
-pathways<-c("NFKB","Inflammasome","Uncategoried","Immune metabolism",
-            "IECD","Interferon regulation")
-
-L0<-list()
-for(i in 1:length(pathways)){
-  p<-pathways[i];filter(metainfo,pathway==p)%>%pull(gene)%>%unique()->g
- 
-  L1<-list()
-  for(j in 1:length(g)){
-    index_g<-g[j]
-    pats<-metainfo[metainfo$gene%in%index_g,'ID']
-    data1<-sysdata[,c(1,2,match(pats,colnames(sysdata)))]
-    data1$result<-apply(data1,1,function(x){
-      y<-as.character(x)[-c(1,2)]
-      any(y=="yes")->t1
-      any(y=="no")->t2
-      all(y=="not available")->t3
-      if(t1){
-        res<-c(1)
-      }else if(t2){
-        res<-c(0)
-      }else{
-        res<-c(NA)
-      }
-      return(res)
-    })
-    data1[,c("Number","Number_ID","result")]->data2
-    data2$gene<-index_g
-    L1[[j]]<-data2
-  }
-  l2<-do.call("rbind",L1)
-  L0[[i]]<-l2
-}
-syslist<-do.call("rbind",L0)
-
-
-plot_pheno_heatmap <- function(syslist, metainfo, sysdata,
-                               sys_order, pw_order, ann_colors,
-                               color_present = "#BB0021", color_absent = "#F7F7F7",
-                               color_na = "grey80", border_color = "black",
-                               cellheight = 12, cellwidth = 12){
-  library(pheatmap); library(dplyr); library(tidyr); library(ggplot2)
-  library(grid); library(gtable)
-  syslist$result <- as.numeric(syslist$result)
-  mat <- syslist %>% select(gene, Number_ID, result) %>%
-    pivot_wider(names_from = Number_ID, values_from = result) %>%
-    tibble::column_to_rownames("gene") %>% as.matrix()
-  row_anno <- metainfo %>% select(gene, inheritance, exp, pathway, mechanism) %>%
-    distinct(gene, .keep_all = TRUE) %>% tibble::column_to_rownames("gene")
-  col_anno <- sysdata[, c("Number_ID", "Number")] %>% distinct(Number_ID, .keep_all = TRUE) %>%
-    tibble::column_to_rownames("Number_ID")
-  row_anno$pathway <- factor(row_anno$pathway, levels = pw_order)
-  row_anno <- row_anno[order(row_anno$pathway), ]
-  mat <- mat[rownames(row_anno), ]
-  keep <- colSums(mat == 1, na.rm = TRUE) > 0
-  mat <- mat[, keep]; col_anno <- col_anno[colnames(mat), , drop = FALSE]
-  pw_counts <- table(row_anno$pathway)
-  gaps_row <- cumsum(pw_counts[pw_counts > 0]); gaps_row <- gaps_row[-length(gaps_row)]
-  col_anno$Number <- factor(col_anno$Number, levels = sys_order)
-  col_anno <- col_anno[order(col_anno$Number), , drop = FALSE]
-  mat <- mat[, rownames(col_anno)]
-  gaps_col <- cumsum(table(col_anno$Number)[table(col_anno$Number) > 0])
-  gaps_col <- gaps_col[-length(gaps_col)]
-  remove_anno_border <- function(p){
-    lay <- p$gtable$layout
-    for(i in seq_len(nrow(lay))){
-      if(grepl("annotation", lay$name[i])){
-        g <- p$gtable$grobs[[i]]
-        if(inherits(g, "rect")){ g$gp$col <- NA; p$gtable$grobs[[i]] <- g }
-        if(!is.null(g$children)){
-          for(k in seq_along(g$children)){
-            if(inherits(g$children[[k]], "rect")) g$children[[k]]$gp$col <- NA
-          }
-        }
-      }
-    }
-    return(p)
-  }
-  shrink_legend <- function(p){
-    idx <- grep("annotation_legend", p$gtable$layout$name)
-    for(i in idx){
-      g <- p$gtable$grobs[[i]]
-      if(inherits(g, "gtable")){
-        g$widths[1] <- unit(0.4, "cm")
-        if(length(g$widths) > 2) g$widths[2:(length(g$widths)-1)] <- unit(0.05, "cm")
-        for(k in seq_along(g$grobs)){
-          if(inherits(g$grobs[[k]], "rect")){
-            g$grobs[[k]]$width <- unit(0.4, "cm"); g$grobs[[k]]$height <- unit(0.4, "cm")
-          }
-        }
-      }
-      p$gtable$grobs[[i]] <- g
-    }
-    return(p)
-  }
-  common <- list(color = colorRampPalette(c(color_absent, color_present))(100),
-                 annotation_row = row_anno, annotation_col = col_anno,
-                 annotation_colors = ann_colors, border_color = border_color,
-                 na_col = color_na, fontsize_row = 9, fontsize_col = 7,
-                 cellheight = cellheight, cellwidth = cellwidth, legend = FALSE)
-  p1 <- do.call(pheatmap, c(list(mat = mat, cluster_cols = TRUE, cluster_rows = FALSE,
-                                 gaps_row = gaps_row, main = NA), common))
-  p2 <- do.call(pheatmap, c(list(mat = mat, cluster_cols = FALSE, cluster_rows = FALSE,
-                                 gaps_row = gaps_row, gaps_col = gaps_col, main = NA), common))
-  p3 <- do.call(pheatmap, c(list(mat = mat, cluster_cols = FALSE, cluster_rows = TRUE,
-                                 gaps_col = gaps_col, main = NA), common))
-  p1 <- remove_anno_border(p1); p2 <- remove_anno_border(p2); p3 <- remove_anno_border(p3)
-  p1 <- shrink_legend(p1); p2 <- shrink_legend(p2); p3 <- shrink_legend(p3)
-  prop_table <- syslist %>% filter(result == 1) %>%
-    count(gene, Number, name = "n") %>%
-    group_by(gene) %>% mutate(total = sum(n), prop = n/total) %>% ungroup() %>%
-    arrange(gene, factor(Number, levels = sys_order)) %>%
-    group_by(gene) %>% mutate(rk = row_number()) %>% ungroup()
-  gene_order <- rownames(mat)
-  prop_table$gene <- factor(prop_table$gene, levels = rev(gene_order))
-  mk_stack <- function(show_y = FALSE, show_legend = FALSE){
-    ggplot(prop_table, aes(x = prop, y = gene, fill = Number)) +
-      geom_col(width = 0.9, color = "white", linewidth = 0.3) +
-      geom_text(aes(label = ifelse(rk <= 3, round(prop*100, 2), "")),
-                position = position_stack(vjust = 0.5), color = "black", size = 1.5) +
-      scale_fill_manual(values = ann_colors$Number, drop = FALSE) +
-      scale_x_continuous(expand = c(0,0), labels = scales::percent) +
-      labs(x = "Proportion", y = NULL) +
-      theme_classic() +
-      theme(axis.text.y = if(show_y) element_text(size = 9, color = "black") else element_blank(),
-            axis.ticks.y = element_blank(), axis.line.y = element_blank(),
-            axis.text.x = element_text(size = 7, color = "black"),
-            axis.title.x = element_text(size = 8, color = "black"),
-            legend.position = if(show_legend) "right" else "none",
-            plot.margin = margin(0,0,0,0))
-  }
-  p_stack <- mk_stack(FALSE, FALSE)
-  p_stack_standalone <- mk_stack(TRUE, TRUE)
-  gt <- p2$gtable
-  mat_pos <- gt$layout[grep("matrix", gt$layout$name)[1], ]
-  gt <- gtable_add_cols(gt, unit(3, "cm"), pos = mat_pos$r)
-  gt <- gtable_add_grob(gt, ggplotGrob(p_stack), t = mat_pos$t, b = mat_pos$b,
-                        l = mat_pos$r + 1, r = mat_pos$r + 1, name = "stack")
-  p2$gtable <- gt
-  return(list(cluster_col = p1, block = p2, cluster_row = p3,
-              stack_plot = p_stack_standalone, prop_table = prop_table))
+  df_d <- df[order(df$n, decreasing = TRUE), ]
+  df_d$drug_v <- factor(df_d$drug, levels = df_d$drug)
+  df_d$drug_h <- factor(df_d$drug, levels = rev(df_d$drug))
+  p_v <- ggplot(df_d, aes(x = drug_v, y = pct)) +
+    geom_col(width = bar_width, fill = color) +
+    geom_text(aes(label = pct), vjust = -0.5, size = 3) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+    labs(x = NULL, y = "Proportion (%)") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 7),
+          axis.text.y = element_text(color = "black", size = 7),
+          axis.ticks = element_line(color = "black"),
+          axis.line = element_line(color = "black"))
+  p_h <- ggplot(df_d, aes(x = pct, y = drug_h)) +
+    geom_col(width = bar_width, fill = color) +
+    geom_text(aes(label = pct), hjust = -0.15, size = 3) +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+    labs(x = "Proportion (%)", y = NULL) +
+    theme_classic() +
+    theme(axis.text.x = element_text(color = "black", size = 7),
+          axis.text.y = element_text(color = "black", size = 7),
+          axis.ticks = element_line(color = "black"),
+          axis.line = element_line(color = "black"))
+  
+  class_df <- data.frame(class = names(class_n), n = as.numeric(class_n), stringsAsFactors = FALSE)
+  class_df$pct <- round(class_df$n / sum(class_df$n) * 100, 2)
+  class_df$class <- factor(class_df$class, levels = class_df$class[order(class_df$n, decreasing = TRUE)])
+  p_pie <- ggplot(class_df, aes(x = "", y = n, fill = class)) +
+    geom_bar(stat = "identity", width = 1) +
+    geom_text(aes(label = paste0(pct, "%")), position = position_stack(vjust = 0.5), size = 3) +
+    coord_polar(theta = "y") +
+    labs(x = NULL, y = NULL) +
+    theme_classic() +
+    theme(axis.text = element_blank(), axis.ticks = element_blank(), axis.line = element_blank(),
+          legend.title = element_blank())
+  
+  df_f <- df[order(df$class_pct, df$n, decreasing = TRUE), ]
+  df_f$class_f <- factor(df_f$class, levels = unique(df_f$class))
+  df_f$drug_fv <- factor(df_f$drug, levels = unique(df_f$drug))
+  df_f$drug_fh <- factor(df_f$drug, levels = unlist(lapply(unique(df_f$class), function(cl) rev(df_f$drug[df_f$class == cl])), use.names = FALSE))
+  p_fv <- ggplot(df_f, aes(x = drug_fv, y = pct)) +
+    geom_col(width = bar_width, fill = color) +
+    geom_text(aes(label = pct), vjust = -0.5, size = 2.5) +
+    facet_grid(. ~ class_f, scales = "free_x", space = "free_x") +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+    labs(x = NULL, y = "Proportion (%)") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 7),
+          axis.text.y = element_text(color = "black", size = 7),
+          axis.ticks = element_line(color = "black"),
+          axis.line = element_line(color = "black"),
+          strip.background = element_blank(),
+          strip.text = element_text(color = "black", size = 8))
+  p_fh <- ggplot(df_f, aes(x = pct, y = drug_fh)) +
+    geom_col(width = bar_width, fill = color) +
+    geom_text(aes(label = pct), hjust = -0.15, size = 2.5) +
+    facet_grid(class_f ~ ., scales = "free_y", space = "free_y") +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+    labs(x = "Proportion (%)", y = NULL) +
+    theme_classic() +
+    theme(axis.text.x = element_text(color = "black", size = 7),
+          axis.text.y = element_text(color = "black", size = 7),
+          axis.ticks = element_line(color = "black"),
+          axis.line = element_line(color = "black"),
+          strip.background = element_blank(),
+          strip.text = element_text(color = "black", size = 8))
+  list(vertical = p_v, horizontal = p_h, pie = p_pie, facet_v = p_fv, facet_h = p_fh)
 }
 
-sys_order <- c("Growth and musculoskeletal system",
-               "Systemic Manifestations","Cutaneous-Mucosal system",
-               "Immune system","Digestive system",
-               "Hepatosplenic system","Endocrine system",
-               "Respiratory system","Nervous system",
-               "Hematologic system","Cardiovascular system","Urinary system")
-pw_order <- c("NFKB","Inflammasome","Uncategoried","Immune metabolism","Cell death","Interferon")
-ann_colors <- list(
-  pathway = c("Interferon"="#EC706E","NFKB"="#B3D1E7","Inflammasome"="#6699CC",
-              "Immune metabolism"="#847AB3","Cell death"="#FEC260","Uncategoried"="#EBB1A4"),
-  inheritance = c("AR"="#6699CC","AD"="#FEC260","XLR"="#AF478A"),
-  exp = c("Balanced"="#7E75AB","Myeloid"="#82C0AE"),
-  mechanism = c("deficiency"="#007ABA","gain-of-function"="#EC706E",
-                "haploinsufficiency"="#F1BAAB","NA"="grey80"),
-  Number = c("Growth and musculoskeletal system"="#B5BBE3",
-             "Systemic Manifestations"="#0B71AB",
-             "Cutaneous-Mucosal system"="#EC706E",
-             "Immune system"="#847AB3",
-             "Digestive system"="#86C7B4",
-             "Hepatosplenic system"="#F1BAAB",
-             "Endocrine system"="#D9C2D9",
-             "Respiratory system"="#FFEFC1",
-             "Nervous system"="#FEC260",
-             "Hematologic system"="#9CD2ED",
-             "Cardiovascular system"="#AF478A",
-             "Urinary system"="#CBDAA9"))
-res <- plot_pheno_heatmap(syslist, metainfo, sysdata, sys_order, pw_order, ann_colors,
-                          color_present = "#BB0021", color_absent = "gray90",
-                          color_na = "grey45", border_color = "white",
-                          cellheight = 12, cellwidth = 12)
-res$block
-res$stack_plot
-View(res$prop_table)
+res <- plot_drug_bar(eff_tab, bar_width = 0.6, color = "#6699CC")
+res$vertical      
+res$horizontal   
+res$pie           
+res$facet_v       
+res$facet_h
 
-######5 gene-phenotype heatmap,grouped by patients
-plot_pheno_heatmap_by_patient <- function(clin_path, sys_order,
-                                          pat_cols = NULL,
-                                          ann_colors = NULL,
-                                          gene_map = NULL,
-                                          gene_order = NULL,
-                                          label_gene = TRUE,
-                                          delay_mode = c("bin", "continuous"),
-                                          delay_breaks = c(0, 0.25, 1, 3, 5, Inf),
-                                          delay_labels = c("<=0.25y", "0.25-1y", "1-3y", "3-5y", ">=5y"),
-                                          delay_pal = c("#F7F7F7", "#FFEFC1", "#FEC260", "#F1BAAB", "#EC706E"),
-                                          sex_pal = c("Male" = "#6699CC", "Female" = "#86C7B4"),
-                                          color_present = "#BB0021", color_absent = "gray90",
-                                          color_na = "grey45", border_color = "white",
-                                          gap_bigpts = 1.5,
-                                          strip_border = FALSE,
-                                          drop_empty_feature = TRUE, annotate_system = TRUE,
-                                          cluster_cols = FALSE, fontsize_row = 9,
-                                          cellheight = 7.2, cellwidth = 12,
-                                          silent = FALSE) {
-  library(openxlsx); library(pheatmap); library(grid)
-  delay_mode <- match.arg(delay_mode)
-  
-  clin <- read.xlsx(clin_path, colNames = TRUE)
-  clin$Number_ID <- trimws(clin$Number_ID)
-  if (is.null(pat_cols)) pat_cols <- grep("^P\\d+$", colnames(clin), value = TRUE)
-  pat_cols <- pat_cols[order(as.integer(sub("^P", "", pat_cols)))]
-  
-  sys_list <- grep("ystem", unique(clin$Number), value = TRUE)
-  feat <- clin[clin$Number %in% sys_list, c("Number", "Number_ID", pat_cols)]
-  feat$Number_ID <- trimws(feat$Number_ID)
-  
-  vals <- as.matrix(feat[, pat_cols])
-  mat <- matrix(NA_real_, nrow(vals), ncol(vals), dimnames = list(feat$Number_ID, pat_cols))
-  mat[vals == "yes"] <- 1
-  mat[vals == "no"]  <- 0
-  mat <- t(mat)
-  
-  if (drop_empty_feature) mat <- mat[, colSums(mat == 1, na.rm = TRUE) > 0, drop = FALSE]
-  
-  feat_df <- data.frame(feature = feat$Number_ID, system = feat$Number, stringsAsFactors = FALSE)
-  rownames(feat_df) <- feat$Number_ID
-  feat_df <- feat_df[colnames(mat), , drop = FALSE]
-  feat_df$system <- factor(feat_df$system, levels = sys_order)
-  feat_df <- feat_df[order(feat_df$system, seq_len(nrow(feat_df))), , drop = FALSE]
-  mat <- mat[, rownames(feat_df), drop = FALSE]
-  
-  tab <- table(feat_df$system); tab <- tab[tab > 0]
-  gaps_col <- if (length(tab) > 1) cumsum(tab)[-length(tab)] else NULL
-  
-  get_row <- function(lab) {
-    v <- clin[clin$Number_ID == lab, pat_cols]
-    if (nrow(v) == 0) return(rep(NA_character_, length(pat_cols)))
-    as.character(unlist(v))
-  }
-  to_num <- function(v) suppressWarnings(as.numeric(gsub("[^0-9.]", "", v)))
-  
-  sex <- get_row("Sex")
-  sex <- ifelse(grepl("^m", sex, ignore.case = TRUE), "Male",
-                ifelse(grepl("^f", sex, ignore.case = TRUE), "Female", NA))
-  onset <- to_num(get_row("Age of onset (year)"))
-  dx    <- to_num(get_row("Age of diagnosis (year)"))
-  delay <- as.numeric(ifelse(is.na(onset) | is.na(dx), NA_real_, dx - onset))
-  
-  if (delay_mode == "bin") {
-    delay_var <- cut(delay, breaks = delay_breaks, labels = delay_labels,
-                     right = FALSE, include.lowest = TRUE)
-    delay_cols <- setNames(delay_pal, delay_labels)
-  } else {
-    delay_var <- delay
-    delay_cols <- delay_pal
-  }
-  
-  ann_row <- data.frame(Sex = factor(sex, levels = names(sex_pal)),
-                        "Diagnostic delay" = delay_var,
-                        row.names = pat_cols, check.names = FALSE)
-  
-  gene <- setNames(rep(NA_character_, length(pat_cols)), pat_cols)
-  if (!is.null(gene_map)) {
-    gm <- as.data.frame(gene_map, stringsAsFactors = FALSE)
-    gm$ID <- as.character(gm$ID); gm$gene <- as.character(gm$gene)
-    ok <- gm$ID %in% pat_cols
-    gene[gm$ID[ok]] <- gm$gene[ok]
-  }
-  g_lab <- ifelse(is.na(gene), "Unknown", gene)
-  glev <- if (!is.null(gene_map)) unique(gm$gene) else unique(g_lab)
-  if (!is.null(gene_order)) glev <- c(intersect(gene_order, glev), setdiff(glev, gene_order))
-  glev <- c(glev, setdiff(unique(g_lab), glev))
-  ord <- order(match(g_lab, glev), as.integer(sub("^P", "", pat_cols)))
-  
-  pat_ord <- pat_cols[ord]
-  g_ord   <- g_lab[ord]
-  mat     <- mat[pat_ord, , drop = FALSE]
-  ann_row <- ann_row[pat_ord, , drop = FALSE]
-  
-  rn <- if (label_gene) {
-    ifelse(g_ord == "Unknown", pat_ord, paste0(pat_ord, "_", g_ord))
-  } else pat_ord
-  rownames(mat) <- rn
-  rownames(ann_row) <- rn
-  
-  tab_g <- table(factor(g_ord, levels = unique(g_ord)))
-  gaps_row <- if (length(tab_g) > 1) cumsum(tab_g)[-length(tab_g)] else NULL
-  
-  ann_col <- if (annotate_system) data.frame(System = feat_df$system, row.names = rownames(feat_df)) else NULL
-  
-  if (is.null(ann_colors)) {
-    ann_colors <- list(Sex = sex_pal, "Diagnostic delay" = delay_cols)
-    if (annotate_system) ann_colors$System <- c(
-      "Growth and musculoskeletal system" = "#B5BBE3", "Systemic Manifestations" = "#0B71AB",
-      "Cutaneous-Mucosal system" = "#EC706E", "Immune system" = "#847AB3",
-      "Digestive system" = "#86C7B4", "Hepatosplenic system" = "#F1BAAB",
-      "Endocrine system" = "#D9C2D9", "Respiratory system" = "#FFEFC1",
-      "Nervous system" = "#FEC260", "Hematologic system" = "#9CD2ED",
-      "Cardiovascular system" = "#AF478A", "Urinary system" = "#CBDAA9")
-  }
-  
-  if (!is.null(gaps_row) && !is.null(gap_bigpts)) {
-    ns <- asNamespace("pheatmap")
-    fc0 <- tryCatch(get("find_coordinates", envir = ns), error = function(e) NULL)
-    if (!is.null(fc0)) {
-      gpt <- gap_bigpts
-      fc1 <- function(n, gaps, m = 1:n) {
-        if (length(gaps) == 0) return(list(coord = unit(m / n, "npc"), size = unit(1 / n, "npc")))
-        if (max(gaps) > n) stop("Gaps do not match with matrix size")
-        size <- (1 / n) * (unit(1, "npc") - length(gaps) * unit(gpt, "bigpts"))
-        gaps2 <- apply(sapply(gaps, function(gap, x) x > gap, m), 1, sum)
-        list(coord = m * size + (gaps2 * unit(gpt, "bigpts")), size = size)
-      }
-      assignInNamespace("find_coordinates", fc1, ns = "pheatmap")
-      on.exit(assignInNamespace("find_coordinates", fc0, ns = "pheatmap"), add = TRUE)
-    }
-  }
-  
-  p <- pheatmap(mat,
-                cluster_rows = FALSE, cluster_cols = cluster_cols,
-                gaps_row = gaps_row, gaps_col = gaps_col,
-                color = colorRampPalette(c(color_absent, color_present))(100),
-                na_col = color_na,
-                annotation_row = ann_row, annotation_col = ann_col,
-                annotation_colors = ann_colors,
-                annotation_legend = TRUE, border_color = border_color,
-                fontsize_row = fontsize_row, fontsize_col = 6,
-                cellheight = cellheight, cellwidth = cellwidth,
-                silent = TRUE)
-  
-  gt <- p$gtable
-  if (!strip_border) {
-    kill_col <- function(gb) {
-      if (inherits(gb, "gTree")) {
-        gb$children <- lapply(gb$children, kill_col)
-        return(gb)
-      }
-      if (!is.null(gb$gp) && !is.null(gb$gp$col)) gb$gp$col <- NA
-      gb
-    }
-    for (nm in c("row_annotation", "col_annotation", "annotation_legend")) {
-      k <- which(gt$layout$name == nm)
-      if (length(k)) gt$grobs[[k[1]]] <- kill_col(gt$grobs[[k[1]]])
-    }
-    p$gtable <- gt
-  }
-  if (!silent) { grid.newpage(); grid.draw(gt) }
-  
-  list(plot = p, mat = mat, ann_row = ann_row, ann_col = ann_col,
-       feature_order = feat_df, gaps_col = gaps_col, gaps_row = gaps_row,
-       pat_order = rn)
-}
+######2 sig use (no result was detected with p.adjust < 0.05)
 library(openxlsx)
-metainfo<-read.xlsx("E:/Cohort PPT/JIA/0903_Clean case.xlsx")
+library(dplyr)
 
-res_pat <- plot_pheno_heatmap_by_patient(
-  clin_path = "E:/Cohort PPT/JIA/code/Clinical data.xlsx",
-  sys_order = sys_order, delay_mode = "bin",
-  gene_map = metainfo %>% arrange(gene) %>% select(ID, gene),
-  gap_bigpts = 1.23)
+###(1) running analysis
+treat <- read.xlsx("E:\\Cohort PPT\\JIA\\code\\treatment data.xlsx", check.names = FALSE)
+colnames(treat) <- make.names(colnames(treat))
+out_col <- grep("Response", colnames(treat), value = TRUE)[1]
+eff_col <- grep("Effective", colnames(treat), value = TRUE)[1]
+stages <- c("Before genetic diagnosis", "Maximum disease activity", "Max response", "Last follow-up")
+drug_cols <- make.names(c("Antibiotics", "Non steroidal Anti-Inflammatory Drugs (NSAIDs)",
+                          "Glucocorticoids", "Conventional synthetic DMARDs (csDMARDs)", "Anti-TNF", "Anti-IL-1",
+                          "Anti-IL-6", "B-cell targeted therapy", "JAK inhibitors"))
+drug_labs <- c("Antibiotics", "NSAIDs", "Glucocorticoids", "csDMARDs", "Anti-TNF", "Anti-IL-1", "Anti-IL-6", "B-cell", "JAKi")
+
+run_fisher <- function(stage, outcome = c("response", "sfr"), gc_strict = FALSE) {
+  outcome <- match.arg(outcome)
+  data1 <- treat[treat$Stage == stage, ]
+  stopifnot(nrow(data1) > 0)
+  resp <- trimws(as.character(data1[[out_col]]))
+  if (outcome == "response") {
+    ev <- ifelse(resp %in% c("Complete response", "Partial response"), 1L,
+                 ifelse(resp == "Nonresponse", 0L, NA_integer_))
+  } else {
+    gc <- trimws(as.character(data1[["Glucocorticoids"]]))
+    gc_known <- !is.na(data1[["Glucocorticoids"]]) & gc != ""
+    gu <- ifelse(gc_known, gc != "unused", NA)
+    if (gc_strict) {
+      e <- grepl("prednisolone|methylprednisolone|dexamethasone|prednisone|hydrocortisone",
+                 tolower(as.character(data1[[eff_col]])))
+      gu <- ifelse(gc_known, gu | e, NA)
+    }
+    resp_known <- resp %in% c("Complete response", "Partial response", "Nonresponse")
+    ev <- ifelse(!gc_known | !resp_known, NA_integer_,
+                 as.integer(!gu & resp %in% c("Complete response", "Partial response")))
+  }
+  ok <- !is.na(ev)
+  res_list <- list()
+  for (j in seq_along(drug_cols)) {
+    if (outcome == "sfr" && drug_cols[j] == "Glucocorticoids") next
+    x <- trimws(as.character(data1[[drug_cols[j]]]))
+    used <- !is.na(x) & x != "unused"
+    unused <- !is.na(x) & x == "unused"
+    n_use <- sum(used & ok); n_unused <- sum(unused & ok)
+    k_use <- sum(ev[used & ok] == 1); k_unused <- sum(ev[unused & ok] == 1)
+    if (n_use == 0 || n_unused == 0) {
+      res_list[[drug_labs[j]]] <- data.frame(Stage = stage, Outcome = outcome, Drug = drug_labs[j],
+                                             n_total = sum(ok), used_n = n_use, event_used = k_use, non_event_used = n_use - k_use,
+                                             event_used_pct = NA, unused_n = n_unused, event_unused = k_unused,
+                                             non_event_unused = n_unused - k_unused, event_unused_pct = NA,
+                                             OR = NA, p = NA, n_missing_drug = sum(ok & is.na(x)), n_missing_outcome = sum(!ok))
+    } else {
+      ft <- fisher.test(matrix(c(k_use, n_use - k_use, k_unused, n_unused - k_unused), nrow = 2, byrow = TRUE))
+      res_list[[drug_labs[j]]] <- data.frame(Stage = stage, Outcome = outcome, Drug = drug_labs[j],
+                                             n_total = sum(ok), used_n = n_use, event_used = k_use, non_event_used = n_use - k_use,
+                                             event_used_pct = round(100 * k_use / n_use, 1), unused_n = n_unused, event_unused = k_unused,
+                                             non_event_unused = n_unused - k_unused, event_unused_pct = round(100 * k_unused / n_unused, 1),
+                                             OR = unname(ft$estimate), p = ft$p.value,
+                                             n_missing_drug = sum(ok & is.na(x)), n_missing_outcome = sum(!ok))
+    }
+  }
+  df <- do.call(rbind, res_list)
+  df$p_adj <- p.adjust(df$p, method = "BH")
+  df
+}
+
+res_resp_all <- bind_rows(lapply(stages, function(s) run_fisher(s, "response")))
+res_sfr_all  <- bind_rows(lapply(stages, function(s) run_fisher(s, "sfr")))
+res_resp_all
+res_sfr_all
+all(res_sfr_all$used_n + res_sfr_all$unused_n + res_sfr_all$n_missing_drug == res_sfr_all$n_total)
+unique(res_sfr_all$n_total)
+all(res_resp_all$used_n + res_resp_all$unused_n + res_resp_all$n_missing_drug == res_resp_all$n_total)
+unique(res_resp_all$n_total)
+
+screen_sig <- function(df, cut = 0.05, adj = TRUE) {
+  col <- if (adj) "p_adj" else "p"
+  out <- df[!is.na(df[[col]]) & df[[col]] < cut, ]
+  out <- out[order(out[[col]]), ]
+  out[, c("Stage", "Outcome", "Drug", "used_n", "event_used", "event_used_pct",
+          "unused_n", "event_unused", "event_unused_pct", "OR", "p", "p_adj")]
+}
+
+sig_resp_adj <- screen_sig(res_resp_all, 0.05, TRUE);  sig_resp_adj
+sig_resp_raw <- screen_sig(res_resp_all, 0.05, FALSE); sig_resp_raw
+sig_sfr_adj  <- screen_sig(res_sfr_all, 0.05, TRUE);   sig_sfr_adj
+sig_sfr_raw  <- screen_sig(res_sfr_all, 0.05, FALSE);  sig_sfr_raw
+
+###(2) pheatmap or bar for visualization
+plot_fisher_res <- function(df, stage, drug, fill_cols = c("#D8A0C0", "#6699CC"),
+                            low_col = "#6699CC", high_col = "#DF5734", text_size = 3.2) {
+  r <- df[df$Stage == stage & df$Drug == drug, ]
+  if (nrow(r) != 1) stop("stage / drug not found or duplicated")
+  ylab <- ifelse(r$Outcome == "sfr", "Steroid-free remission (%)", "Response (%)")
+  plab <- paste0("Fisher p = ", formatC(r$p, format = "e", digits = 2))
+  bar <- data.frame(Group = factor(c("Yes", "No"), levels = c("Yes", "No")),
+                    n = c(r$used_n, r$unused_n), e = c(r$event_used, r$event_unused),
+                    pct = c(r$event_used_pct, r$event_unused_pct))
+  bar$lab <- paste0(bar$e, "/", bar$n)
+  p_bar <- ggplot(bar, aes(Group, pct, fill = Group)) +
+    geom_col(width = 0.68) +
+    geom_text(aes(label = lab), vjust = -0.4, size = text_size) +
+    scale_fill_manual(values = fill_cols) +
+    scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 25),
+                       expand = expansion(mult = c(0, 0.14))) +
+    labs(x = paste0(drug, " (Yes / No)"), y = ylab,
+         title = paste0(stage, "\n", plab)) +
+    theme_classic() +
+    theme(plot.title = element_text(hjust = 0.5, size = 9.5),
+          axis.text = element_text(color = "black", size = 9),
+          axis.title = element_text(color = "black", size = 9),
+          legend.position = "none")
+  tile <- data.frame(Group = factor(c("Yes", "Yes", "No", "No"), levels = c("No", "Yes")),
+                     Out = factor(c("SFR", "no SFR", "SFR", "no SFR"), levels = c("SFR", "no SFR")),
+                     n = c(r$event_used, r$used_n - r$event_used,
+                           r$event_unused, r$unused_n - r$event_unused))
+  p_tile <- ggplot(tile, aes(Out, Group, fill = n)) +
+    geom_tile(color = "white", linewidth = 0.8, width = 0.95, height = 0.9) +
+    geom_text(aes(label = n), size = text_size + 1) +
+    scale_fill_gradient(low = low_col, high = high_col, name = "n") +
+    labs(x = NULL, y = NULL, title = paste0(drug, " - ", stage, "\n", plab)) +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5, size = 9.5),
+          axis.text = element_text(color = "black", size = 9),
+          panel.grid = element_blank())
+  list(bar = p_bar, tile = p_tile, row = r)
+}
+
+r_il1 <- plot_fisher_res(res_sfr_all, "Max response", "Anti-IL-1")
+r_il1$bar
+r_il1$tile
+r_il1$row
+
+
+
+#View(treat)
+# filter(treat,Stage=="Maximum disease activity")->data1
+# colnames(data1)[c(5:16,19)]
+# index<-c(5:13)#drug types and treatment response
+# ###check (both drugs and "unused")
+# for(i in index){
+#   print(table(data1[,i]))
+# }
+
+# run_fisher <- function(stage) {
+#   data1 <- filter(treat, Stage == stage)
+#   data1 <- data1[data1[[20]] %in% c("Complete response", "Partial response", "Nonresponse"), ]
+#   index <- c(5:13); out_col <- 20
+#   res_list <- list()
+#   for(i in index) {
+#     noall <- data1[which(data1[,i] == "unused"), out_col]
+#     l1 <- sum(noall == "Complete response"); l2 <- sum(noall == "Partial response"); l3 <- sum(noall == "Nonresponse"); l0 <- l1 + l2
+#     yesall <- data1[which(data1[,i] != "unused"), out_col]
+#     k1 <- sum(yesall == "Complete response"); k2 <- sum(yesall == "Partial response"); k3 <- sum(yesall == "Nonresponse"); k0 <- k1 + k2
+#     if (length(yesall) == 0 || length(noall) == 0) {
+#       res_list[[colnames(data1)[i]]] <- data.frame(used_n = length(yesall), unused_n = length(noall), resp_used = k0, nonresp_used = k3, resp_unused = l0, nonresp_unused = l3, resp_used_pct = NA, resp_unused_pct = NA, OR = NA, p = NA)
+#     } else {
+#       tab <- matrix(c(k0, k3, l0, l3), nrow = 2, byrow = TRUE,
+#                     dimnames = list(Use = c("used", "unused"), Outcome = c("Response", "Nonresponse")))
+#       ft <- fisher.test(tab, alternative = "two.sided")
+#       res_list[[colnames(data1)[i]]] <- data.frame(used_n = length(yesall), unused_n = length(noall), resp_used = k0, nonresp_used = k3, resp_unused = l0, nonresp_unused = l3, resp_used_pct = round(100 * k0 / length(yesall), 1), resp_unused_pct = round(100 * l0 / length(noall), 1), OR = ft$estimate, p = ft$p.value)
+#     }
+#   }
+#   fisher_df <- do.call(rbind, res_list)
+#   fisher_df$p_adj <- p.adjust(fisher_df$p, method = "BH")
+#   fisher_df
+# }
+# unique(treat$Stage)
+# res_max <- run_fisher("Maximum disease activity")  
+# res_max
+# res_maxres <- run_fisher("Max response") 
+# res_maxres
+# res_last <- run_fisher("Last follow-up") 
+# res_last
+# res_before <- run_fisher("Before genetic diagnosis") 
+# res_before
+
+######3 bubble plot for therapies and gene as well as pathway (efficacy rate= (CR+0.5*PR)/)
+### JIA gene x drug class x efficacy (circle + square, normal + swapped)
+library(openxlsx); library(dplyr); library(tidyr); library(ggplot2)
+
+treat <- read.xlsx("E:\\Cohort PPT\\JIA\\code\\treatment data.xlsx", check.names = FALSE)
+metainfo <- read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
+
+library(openxlsx); library(dplyr); library(tidyr); library(ggplot2); library(grDevices)
+
+treat <- read.xlsx("E:\\Cohort PPT\\JIA\\code\\treatment data.xlsx", check.names = FALSE)
+colnames(treat) <- make.names(colnames(treat))
+metainfo <- read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
+colnames(metainfo) <- make.names(colnames(metainfo))
+
+###(1) version 1, merge targeted and non-targetd therapies into one plot
+plot_bubble <- function(stage = "Maximum disease activity",
+                        label = TRUE,
+                        drug_cols = c("Anti-TNF", "Anti-IL-1", "Anti-IL-6", "JAK inhibitors",
+                                      "B-cell targeted therapy",
+                                      "Conventional synthetic DMARDs (csDMARDs)",
+                                      "Glucocorticoids",
+                                      "Non steroidal Anti-Inflammatory Drugs (NSAIDs)"),
+                        drug_labs = c("Anti-TNF", "Anti-IL-1", "Anti-IL-6", "JAK inhibitors",
+                                      "B-cell", "csDMARDs", "Glucocorticoids", "NSAIDs"),
+                        group_order = c("Inflammasome", "NFKB", "Interferon regulation",
+                                        "Immune metabolism", "IECD", "Uncategoried"),
+                        fill_cols = NULL,
+                        low_col = "#6699CC", high_col = "#DF5734",
+                        size_range = c(3, 12), text_size = 2.5) {
+  drug_cols <- make.names(drug_cols)
+  out_col <- grep("Response", colnames(treat), value = TRUE)[1]
+  data1 <- treat[treat$Stage == stage, ]
+  data1$Number <- trimws(as.character(data1$Number))
+  data1$gene <- toupper(trimws(as.character(metainfo$gene[match(data1$Number, metainfo$ID)])))
+  data1$pathway <- as.character(metainfo$pathway[match(data1$Number, metainfo$ID)])
+  long <- data1 %>%
+    filter(!is.na(.data[[out_col]]) & .data[[out_col]] != "unknown") %>%
+    pivot_longer(all_of(drug_cols), names_to = "class", values_to = "drug") %>%
+    mutate(class = factor(drug_labs[match(class, drug_cols)], levels = drug_labs)) %>%
+    filter(!is.na(drug) & trimws(drug) != "unused" & !is.na(gene) & !is.na(pathway))
+  bubble_df <- long %>%
+    group_by(gene, pathway, class) %>%
+    summarise(total = n(),
+              eff = (sum(.data[[out_col]] == "Complete response") +
+                       0.5 * sum(.data[[out_col]] == "Partial response")) / n(),
+              .groups = "drop") %>%
+    mutate(eff_pct = round(eff * 100, 1)) %>%
+    filter(total > 0)
+  bubble_df$pathway <- factor(bubble_df$pathway, levels = intersect(group_order, unique(bubble_df$pathway)))
+  bubble_df <- bubble_df %>%
+    group_by(pathway) %>%
+    mutate(gene = factor(gene, levels = rev(sort(unique(gene))))) %>%
+    ungroup()
+  
+  th <- theme(panel.grid.minor = element_blank(),
+              panel.grid.major = element_line(color = "gray90"),
+              panel.grid.major.y = element_line(linetype = "dashed"),
+              panel.grid.major.x = element_line(linetype = "dotted"),
+              panel.border = element_rect(color = "black", linewidth = 0.5),
+              strip.background = element_blank(),
+              strip.text = element_text(face = "bold", hjust = 0, size = 7),
+              axis.text.x = element_text(angle = 45, hjust = 1, color = "black"),
+              axis.text.y = element_text(color = "black", face = "italic"),
+              axis.ticks = element_line(color = "black"))
+  base <- list(facet_grid(pathway ~ ., scales = "free_y", space = "free_y"),
+               labs(x = NULL, y = NULL), theme_bw(), th)
+  
+  fs <- if (is.null(fill_cols)) scale_fill_gradient(low = low_col, high = high_col, limits = c(0, 100))
+  else scale_fill_gradientn(colours = fill_cols, limits = c(0, 100))
+  size_n <- scale_size_continuous(range = size_range, name = "Total Treated (n)",
+                                  breaks = sort(unique(bubble_df$total)))
+  
+  p_circle <- ggplot(bubble_df, aes(x = class, y = gene)) +
+    geom_point(aes(size = total, fill = eff_pct), shape = 21, color = "black", stroke = 0.5) +
+    fs + size_n + base
+  if (label) p_circle <- p_circle + geom_text(aes(label = eff_pct), size = text_size)
+  
+  p_square <- ggplot(bubble_df, aes(x = class, y = gene)) +
+    geom_point(aes(size = total, fill = eff_pct), shape = 22, color = "black", stroke = 0.5) +
+    fs + size_n + base
+  if (label) p_square <- p_square + geom_text(aes(label = eff_pct), size = text_size)
+  
+  tot_rng <- range(bubble_df$total)
+  if (tot_rng[1] == tot_rng[2]) tot_rng <- tot_rng + c(-0.5, 0.5)
+  fs_rev <- if (is.null(fill_cols)) scale_fill_gradient(low = low_col, high = high_col, limits = tot_rng)
+  else scale_fill_gradientn(colours = fill_cols, limits = tot_rng)
+  size_eff <- scale_size_continuous(range = size_range, name = "Efficacy Rate (%)",
+                                    breaks = sort(unique(bubble_df$eff_pct)))
+  
+  p_circle_rev <- ggplot(bubble_df, aes(x = class, y = gene)) +
+    geom_point(aes(size = eff_pct, fill = total), shape = 21, color = "black", stroke = 0.5) +
+    fs_rev + size_eff + base
+  if (label) p_circle_rev <- p_circle_rev + geom_text(aes(label = total), size = text_size)
+  
+  p_square_rev <- ggplot(bubble_df, aes(x = class, y = gene)) +
+    geom_point(aes(size = eff_pct, fill = total), shape = 22, color = "black", stroke = 0.5) +
+    fs_rev + size_eff + base
+  if (label) p_square_rev <- p_square_rev + geom_text(aes(label = total), size = text_size)
+  
+  list(circle = p_circle, square = p_square,
+       circle_rev = p_circle_rev, square_rev = p_square_rev,
+       data = bubble_df)
+}
+
+cols_list <- list(p1 = colorRampPalette(c("#6699CC", "#DF5734"))(101))
+
+stages <- c("Before genetic diagnosis", 
+            "Maximum disease activity", 
+            "Max response", "Last follow-up")
+res_all <- list()
+for (stg in stages) {
+  res_all[[stg]] <- plot_bubble(stage = stg, fill_cols = cols_list$p1, label = TRUE)
+}
+
+(res_all[["Maximum disease activity"]]$circle+theme(legend.position = "none"))|res_all[["Max response"]]$circle
+
+###(2) version 2, split targeted and non-targetd therapies as two plots
+plot_bubble_split <- function(stage = "Maximum disease activity",
+                              label = TRUE,
+                              drug_grp1 = c("Anti-TNF", "Anti-IL-1", "Anti-IL-6", "JAK inhibitors",
+                                            "B-cell targeted therapy"),
+                              drug_grp2 = c("Conventional synthetic DMARDs (csDMARDs)",
+                                            "Glucocorticoids",
+                                            "Non steroidal Anti-Inflammatory Drugs (NSAIDs)"),
+                              drug_labs = c("Anti-TNF", "Anti-IL-1", "Anti-IL-6", "JAK inhibitors",
+                                            "B-cell", "csDMARDs", "Glucocorticoids", "NSAIDs"),
+                              group_order = c("Inflammasome", "NFKB", "Interferon regulation",
+                                              "Immune metabolism", "IECD", "Uncategoried"),
+                              fill_cols = NULL,
+                              low_col = "#6699CC", high_col = "#DF5734",
+                              max_size = 11, text_size = 2.5,
+                              amplify = TRUE, free_fill = FALSE,
+                              shape = c("circle", "square"),
+                              layout = c("horizontal", "vertical"),
+                              widths = c(1, 1), heights = NULL) {
+  library(dplyr); library(tidyr); library(ggplot2); library(patchwork)
+  shape <- match.arg(shape)
+  layout <- match.arg(layout)
+  shp <- if (shape == "circle") 16 else 15
+  
+  drug_all <- make.names(c(drug_grp1, drug_grp2))
+  lab_map <- setNames(drug_labs, drug_all)
+  out_col <- grep("Response", colnames(treat), value = TRUE)[1]
+  
+  data1 <- treat[treat$Stage == stage, ]
+  data1$Number <- trimws(as.character(data1$Number))
+  data1$gene <- toupper(trimws(as.character(metainfo$gene[match(data1$Number, metainfo$ID)])))
+  data1$pathway <- as.character(metainfo$pathway[match(data1$Number, metainfo$ID)])
+  
+  long <- data1 %>%
+    filter(!is.na(.data[[out_col]]) & .data[[out_col]] != "unknown") %>%
+    pivot_longer(all_of(drug_all), names_to = "class", values_to = "drug") %>%
+    filter(!is.na(drug) & trimws(drug) != "unused" & !is.na(gene) & !is.na(pathway))
+  
+  bubble_df <- long %>%
+    group_by(gene, pathway, class) %>%
+    summarise(total = n(),
+              eff = (sum(.data[[out_col]] == "Complete response") +
+                       0.5 * sum(.data[[out_col]] == "Partial response")) / n(),
+              .groups = "drop") %>%
+    mutate(eff_pct = round(eff * 100, 1)) %>%
+    filter(total > 0)
+  
+  bubble_df$pathway <- factor(bubble_df$pathway,
+                              levels = intersect(group_order, unique(bubble_df$pathway)))
+  bubble_df <- bubble_df %>%
+    group_by(pathway) %>%
+    mutate(gene = factor(gene, levels = rev(sort(as.character(unique(gene)))))) %>%
+    ungroup()
+  
+  g_max <- max(bubble_df$total)
+  
+  th <- theme(panel.grid.minor = element_blank(),
+              panel.grid.major = element_line(color = "gray90"),
+              panel.grid.major.y = element_line(linetype = "dashed"),
+              panel.grid.major.x = element_line(linetype = "dotted"),
+              panel.border = element_rect(color = "black", linewidth = 0.5),
+              strip.background = element_blank(),
+              strip.text = element_text(face = "bold", hjust = 0, size = 7),
+              axis.text.x = element_text(angle = 45, hjust = 1, color = "black"),
+              axis.text.y = element_text(color = "black", face = "italic"),
+              axis.ticks = element_line(color = "black"))
+  
+  mk <- function(grp) {
+    d <- bubble_df[bubble_df$class %in% make.names(grp), , drop = FALSE]
+    d$class <- factor(lab_map[as.character(d$class)], levels = unname(lab_map[make.names(grp)]))
+    if (nrow(d) == 0) return(list(p = ggplot() + theme_void(), rows = 0))
+    d$pathway <- droplevels(d$pathway)
+    d$gene <- droplevels(d$gene)
+    
+    lb <- max(d$total)
+    mult <- if (amplify) g_max / lb else 1
+    d$sz_val <- d$total * mult
+    tb <- sort(unique(d$total))
+    
+    sz <- scale_size_area(max_size = max_size, limits = c(0, g_max),
+                          breaks = tb * mult, labels = as.character(tb),
+                          name = "Total Treated (n)")
+    
+    fsrc <- if (free_fill) d else bubble_df
+    fl <- if (free_fill) range(fsrc$eff_pct) else c(0, 100)
+    fs <- if (is.null(fill_cols)) scale_colour_gradient(low = low_col, high = high_col, limits = fl)
+    else scale_colour_gradientn(colours = fill_cols, limits = fl)
+    
+    p <- ggplot(d, aes(x = class, y = gene)) +
+      geom_point(aes(size = sz_val, colour = eff_pct), shape = shp) +
+      fs + sz +
+      facet_grid(pathway ~ ., scales = "free_y", space = "free_y") +
+      labs(x = NULL, y = NULL) + theme_bw() + th
+    if (label) p <- p + geom_text(aes(label = eff_pct), size = text_size)
+    list(p = p, rows = nrow(distinct(d, pathway, gene)))
+  }
+  
+  a1 <- mk(drug_grp1)
+  a2 <- mk(drug_grp2)
+  p1 <- a1$p
+  p2 <- a2$p
+  hh <- if (is.null(heights)) c(a1$rows, a2$rows) else heights
+  hh[hh <= 0] <- 0.6
+  
+  combo <- if (layout == "horizontal") {
+    (p1 + theme(legend.position = "right")) | (p2 + theme(legend.position = "right"))
+  } else {
+    (p1 + theme(legend.position = "right")) / (p2 + theme(legend.position = "right")) +
+      plot_layout(heights = hh)
+  }
+  
+  list(grp1 = p1, grp2 = p2, combo = combo,
+       rows_grp1 = a1$rows, rows_grp2 = a2$rows, heights = hh,
+       data = bubble_df, data_grp1 = bubble_df[bubble_df$class %in% make.names(drug_grp1), ],
+       data_grp2 = bubble_df[bubble_df$class %in% make.names(drug_grp2), ])
+}
+
+#cols_list <- list(p1 = colorRampPalette(c("#6699CC", "#DF5734"))(101))
+cols_list <- list(p1 = colorRampPalette(c("#6699CC", "#EC706E"))(101))
+res_split <- list()
+for (stg in c("Maximum disease activity", "Max response")) {
+  res_split[[stg]] <- plot_bubble_split(stage = stg, fill_cols = cols_list$p1, label = TRUE)
+}
+res_split[["Maximum disease activity"]]$combo
+res_split[["Max response"]]$combo
+
+
+
+######4 upset plots for combined therapies and line plot for disease  activity score 
+### JIA combination therapy module: UpSet + gene-labeled score + pathway heat/pie remove non-response  only including partial and complete response
+library(openxlsx); library(dplyr); library(UpSetR); library(ggplot2)
+treat <- read.xlsx("E:\\Cohort PPT\\JIA\\code\\treatment data.xlsx", check.names = FALSE)
+colnames(treat) <- make.names(colnames(treat))
+clin <- read.xlsx("E:\\Cohort PPT\\JIA\\0903_Clean case.xlsx")
+
+class_cols <- c(5:13)
+short_names <- c("Antibiotics", "NSAIDs", "Glucocorticoids", "csDMARDs",
+                 "Anti-TNF", "Anti-IL-1", "Anti-IL-6", "B-cell", "JAKi")
+treat2 <- treat
+colnames(treat2)[class_cols] <- short_names
+score_cols <- 21
+pathway_col <- c("NFKB" = "#B3D1E7", "Inflammasome" = "#6699CC",
+                 "Immune metabolism" = "#847AB3", "Interferon regulation" = "#EC706E",
+                 "IECD" = "#FEC260", "Uncategoried" = "#EBB1A4")
+
+prep_combo <- function(stage, score_col = score_cols) {
+  data1 <- treat2[treat2$Stage == stage, ]
+  out_col <- grep("Response", colnames(data1), value = TRUE)[1]
+  data1 <- data1[trimws(as.character(data1[[out_col]])) %in% c("Complete response", "Partial response"), ]
+  bin <- sapply(class_cols, function(i) as.integer(!is.na(data1[[i]]) & data1[[i]] != "unused"))
+  colnames(bin) <- short_names
+  keep <- rowSums(bin) >= 2
+  bin <- bin[keep, , drop = FALSE]
+  score <- as.numeric(data1[[score_col]][keep])
+  id <- trimws(as.character(data1$Number[keep]))
+  pathway <- clin$pathway[match(id, clin$ID)]
+  gene <- toupper(trimws(as.character(clin$gene[match(id, clin$ID)])))
+  ok <- !is.na(pathway) & !is.na(score)
+  list(bin = bin[ok, , drop = FALSE], score = score[ok],
+       pathway = pathway[ok], gene = gene[ok], id = id[ok])
+}
+
+combo_pw_long <- function(d, nintersects = 10) {
+  set_order <- names(sort(colSums(d$bin), decreasing = TRUE))
+  set_order <- set_order[colSums(d$bin[, set_order, drop = FALSE]) > 0]
+  n <- length(set_order)
+  main_list <- list(); meta_list <- list()
+  for (code in 1:(2^n - 1)) {
+    bits <- as.integer(intToBits(code))[1:n]
+    sel <- set_order[rev(bits) == 1]
+    idx <- rowSums(d$bin[, sel, drop = FALSE]) == length(sel) &
+      rowSums(d$bin[, setdiff(short_names, sel), drop = FALSE]) == 0
+    f <- sum(idx)
+    if (f > 0) {
+      pw_n <- table(d$pathway[idx])
+      for (p in names(pw_n)) main_list[[length(main_list) + 1]] <- data.frame(
+        combo = paste(sel, collapse = " & "), pathway = p, n = as.numeric(pw_n[p]))
+      meta_list[[length(meta_list) + 1]] <- data.frame(
+        combo = paste(sel, collapse = " & "), total = f,
+        genes = paste(sort(unique(d$gene[idx])), collapse = ", "),
+        patients = paste(sort(d$id[idx]), collapse = ", "),
+        mean_score = mean(d$score[idx], na.rm = TRUE))
+    }
+  }
+  meta_df <- do.call(rbind, meta_list)
+  meta_df <- meta_df[order(meta_df$total, decreasing = TRUE), ]
+  keep <- head(meta_df$combo, nintersects)
+  long <- do.call(rbind, main_list)
+  long <- long[long$combo %in% keep, ]
+  long$combo <- factor(long$combo, levels = keep)
+  long$pathway <- factor(long$pathway, levels = names(pathway_col))
+  list(long = long, meta = meta_df[meta_df$combo %in% keep, ])
+}
+
+plot_combo_pathway_pie <- function(stage, nintersects = 10, pie_cols = pathway_col,
+                                   ncol_pie = 5, show_pct = TRUE, pct_size = 2.2,
+                                   label_r = 1.55, strip_size = 7,
+                                   legend_size = 7, legend_key = 0.3,
+                                   score_col = score_cols) {
+  d <- prep_combo(stage, score_col)
+  l <- combo_pw_long(d, nintersects)
+  df <- as.data.frame(l$long)
+  df <- df %>% group_by(combo) %>%
+    arrange(desc(as.character(pathway))) %>%
+    mutate(pct = n / sum(n) * 100, ypos = cumsum(pct) - pct / 2) %>%
+    ungroup()
+  p <- ggplot(df, aes(x = 1, y = pct, fill = pathway)) +
+    geom_col(width = 1) +
+    coord_polar(theta = "y", clip = "off") +
+    facet_wrap(~combo, ncol = ncol_pie) +
+    scale_fill_manual(values = pie_cols, name = NULL) +
+    theme_void() +
+    theme(strip.text = element_text(size = strip_size),
+          legend.position = "bottom", legend.key.size = unit(legend_key, "cm"),
+          legend.text = element_text(size = legend_size))
+  if (show_pct) p <- p + geom_text(aes(x = label_r, y = ypos, label = paste0(round(pct, 1), "%")),
+                                   size = pct_size, inherit.aes = FALSE)
+  list(plot = p, data = df)
+}
+
+plot_combo_module <- function(stage, nintersects = 10,
+                              main_color = "#6699CC", sets_color = "#847AB3",
+                              line_color = "#AF478A", point_size = 2, gene_text_size = 2.2,
+                              heat_col = "#6699CC", heat_na = "gray90", heat_text_size = 2.5,
+                              pie_cols = pathway_col, ncol_pie = 5,
+                              pie_show_pct = TRUE, pie_pct_size = 2.2,
+                              pie_label_r = 1.55, pie_strip_size = 7,
+                              pie_legend_size = 7, pie_legend_key = 0.3,
+                              score_col = score_cols) {
+  d <- prep_combo(stage, score_col)
+  l <- combo_pw_long(d, nintersects)
+  combo_df <- l$meta
+  combo_df$combo <- factor(combo_df$combo, levels = as.character(combo_df$combo))
+  
+  ymax <- ceiling(max(combo_df$mean_score, na.rm = TRUE) / 2) * 2
+  p_score <- ggplot(combo_df, aes(x = combo, y = mean_score, group = 1)) +
+    geom_hline(yintercept = c(3, 7), linetype = "dashed", color = "grey50", linewidth = 0.5) +
+    geom_line(color = line_color, linewidth = 0.8) +
+    geom_point(color = line_color, size = point_size) +
+    geom_text(aes(label = genes), vjust = -1.5, size = gene_text_size) +
+    scale_y_continuous(limits = c(0, ymax), breaks = seq(0, ymax, by = 2),
+                       expand = expansion(mult = c(0, 0.15))) +
+    labs(x = NULL, y = "Mean score") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 7),
+          axis.text.y = element_text(color = "black", size = 7),
+          axis.ticks = element_line(color = "black"),
+          axis.line = element_line(color = "black"))
+  
+  set_order <- names(sort(colSums(d$bin), decreasing = TRUE))
+  set_order <- set_order[colSums(d$bin[, set_order, drop = FALSE]) > 0]
+  p_upset <- upset(as.data.frame(d$bin), sets = set_order, nsets = length(set_order),
+                   nintersects = nintersects, order.by = "freq",
+                   main.bar.color = main_color, sets.bar.color = sets_color,
+                   mainbar.y.label = "No. of patients", sets.x.label = "Patients using class")
+  
+  grid <- expand.grid(combo = levels(l$long$combo), pathway = names(pathway_col))
+  dfm <- merge(grid, as.data.frame(l$long), by = c("combo", "pathway"), all.x = TRUE)
+  dfm$combo <- factor(dfm$combo, levels = levels(l$long$combo))
+  dfm$pathway <- factor(dfm$pathway, levels = rev(names(pathway_col)))
+  dfm$fill_lab <- ifelse(is.na(dfm$n), "absent", "present")
+  p_heat <- ggplot(dfm, aes(x = combo, y = pathway, fill = fill_lab)) +
+    geom_tile(color = "white", linewidth = 0.5) +
+    geom_text(aes(label = ifelse(is.na(n), "", n)), size = heat_text_size) +
+    scale_fill_manual(values = c(present = heat_col, absent = heat_na), guide = "none") +
+    labs(x = NULL, y = "Pathway") +
+    theme_bw() +
+    theme(panel.grid = element_blank(),
+          axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 7),
+          axis.text.y = element_text(color = "black", size = 7),
+          axis.ticks = element_blank())
+  
+  p_pie <- plot_combo_pathway_pie(stage, nintersects, pie_cols = pie_cols, ncol_pie = ncol_pie,
+                                  show_pct = pie_show_pct, pct_size = pie_pct_size,
+                                  label_r = pie_label_r, strip_size = pie_strip_size,
+                                  legend_size = pie_legend_size, legend_key = pie_legend_key,
+                                  score_col = score_col)$plot
+  
+  table_out <- combo_df %>%
+    transmute(Combo = as.character(combo), N = total, Mean_score = round(mean_score, 2),
+              Genes = genes, Patients = patients)
+  list(upset = p_upset, score = p_score, heat = p_heat, pie = p_pie, table = table_out)
+}
+
+stages <- c("Before genetic diagnosis", "Maximum disease activity", "Max response", "Last follow-up")
+res_combo <- lapply(stages, function(s) plot_combo_module(
+  stage = s, nintersects = 10,
+  main_color = "#6699CC", sets_color = "#847AB3", line_color = "#AF478A", point_size = 2,
+  gene_text_size = 2.2, heat_col = "#6699CC", heat_na = "gray90", heat_text_size = 2.5,
+  pie_cols = pathway_col, ncol_pie = 5, pie_show_pct = TRUE, pie_pct_size = 2.2,
+  pie_label_r = 1.55, pie_strip_size = 7, pie_legend_size = 7, pie_legend_key = 0.3,
+  score_col = 21))
+names(res_combo) <- stages
+
+library(patchwork); library(ggplotify)
+res_combo[["Maximum disease activity"]]$upset
+res_combo[["Max response"]]$upset
+p2 <- res_combo[["Maximum disease activity"]]$score | res_combo[["Max response"]]$score
+p3 <- res_combo[["Maximum disease activity"]]$heat  | res_combo[["Max response"]]$heat
+p4 <- res_combo[["Maximum disease activity"]]$pie   | res_combo[["Max response"]]$pie
+
+p1; p2; p3; p4
+res_combo[["Maximum disease activity"]]$table
+res_combo[["Max response"]]$table
+
+#######5 Sangke plots for targeted therapy
+library(openxlsx); library(dplyr); library(ggplot2); library(ggalluvial)
+
+treat <- read.xlsx("E:/Cohort PPT/JIA/code/treatment data.xlsx")
+clin  <- read.xlsx("E:/Cohort PPT/JIA/0903_Clean case.xlsx")
+
+class_cols <- 5:13
+short_names <- c("Antibiotics","NSAIDs","Glucocorticoids","csDMARDs","Anti-TNF","Anti-IL-1","Anti-IL-6","B-cell","JAKi")
+treat2 <- treat
+colnames(treat2)[class_cols] <- short_names
+
+pathway_col <- c(NFKB = "#B3D1E7", Inflammasome = "#6699CC", `Immune metabolism` = "#847AB3",
+                 `Interferon regulation` = "#EC706E", IECD = "#FEC260", Uncategoried = "#EBB1A4")
+drug_tar <- c("Anti-IL-1", "Anti-IL-6", "Anti-TNF", "JAKi")
+stages <- c("Before genetic diagnosis", "Maximum disease activity", "Max response", "Last follow-up")
+
+sankey_df <- function(stage, drug_cols = drug_tar, min_class = 2,
+                      drop_nonresponse = TRUE, exclude_unused = TRUE) {
+  data1 <- filter(treat2, Stage == stage)
+  bin <- sapply(class_cols, function(i) as.integer(!is.na(data1[[i]]) & data1[[i]] != "unused"))
+  colnames(bin) <- short_names
+  keep <- rowSums(bin) >= min_class
+  mid <- apply(data1[keep, drug_cols, drop = FALSE], 1, function(r) {
+    v <- trimws(r[!is.na(r) & trimws(r) != "unused"])
+    if (length(v) == 0) "unused" else paste(v, collapse = " & ")
+  })
+  oc <- grep("Response", colnames(data1), value = TRUE)
+  df <- data.frame(pathway = clin$pathway[match(data1$Number[keep], clin$ID)],
+                   gene = clin$gene[match(data1$Number[keep], clin$ID)],
+                   combo = mid,
+                   outcome = trimws(as.character(data1[[oc]][keep])),
+                   stringsAsFactors = FALSE)
+  df <- df[!is.na(df$pathway) & df$outcome != "unknown", ]
+  if (drop_nonresponse) df <- df[df$outcome != "Nonresponse", ]
+  if (exclude_unused) df <- df[df$combo != "unused", ]
+  df
+}
+
+plot_sankey3 <- function(df, by = c("pathway", "gene"), width = 0.44,
+                         colors = pathway_col, label_size = 2.5) {
+  by <- match.arg(by)
+  df$A1 <- factor(df[[by]])
+  df$combo <- factor(df$combo)
+  df$outcome <- factor(df$outcome)
+  p <- ggplot(df, aes(axis1 = A1, axis2 = combo, axis3 = outcome)) +
+    geom_alluvium(aes(fill = pathway), width = width) +
+    geom_stratum(width = width, fill = "grey92", color = "black") +
+    geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = label_size) +
+    scale_x_discrete(limits = c(ifelse(by == "pathway", "Pathway", "Gene"), "Drugs", "Outcome"),
+                     expand = c(0.05, 0.05)) +
+    scale_fill_manual(values = colors) +
+    labs(x = NULL, y = NULL) +
+    theme_void() +
+    theme(legend.position = "none")
+  list(plot = p, data = df)
+}
+
+sk_df <- sankey_df("Max response")
+sk_pw <- plot_sankey3(sk_df, "pathway"); sk_pw$plot
+sk_gn <- plot_sankey3(sk_df, "gene"); sk_gn$plot
+
+plot_sankey4 <- function(df, width = 0.36, colors = pathway_col, label_size = 2.0) {
+  df$pathway <- factor(df$pathway)
+  df$gene <- factor(df$gene)
+  df$combo <- factor(df$combo)
+  df$outcome <- factor(df$outcome)
+  p <- ggplot(df, aes(axis1 = pathway, axis2 = gene, axis3 = combo, axis4 = outcome)) +
+    geom_alluvium(aes(fill = pathway), width = width) +
+    geom_stratum(width = width, fill = "grey92", color = "black") +
+    geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = label_size) +
+    scale_x_discrete(limits = c("Pathway", "Gene", "Drugs", "Outcome"), expand = c(0.05, 0.05)) +
+    scale_fill_manual(values = colors) +
+    labs(x = NULL, y = NULL) +
+    theme_void() +
+    theme(legend.position = "none")
+  list(plot = p, data = df)
+}
+
+sk_4 <- plot_sankey4(sk_df); sk_4$plot
+
+sankey_bundle <- function(stage, min_class = 2) {
+  df <- sankey_df(stage, min_class = min_class)
+  list(pathway = plot_sankey3(df, "pathway"),
+       gene = plot_sankey3(df, "gene"),
+       four = plot_sankey4(df),
+       data = df)
+}
+
+sk_all <- lapply(stages, sankey_bundle)
+names(sk_all) <- stages
+data.frame(Stage = stages, n = sapply(sk_all, function(x) nrow(x$data)))
+
+sk_all[["Maximum disease activity"]]$pathway$plot
+sk_all[["Maximum disease activity"]]$gene$plot
+p1<-sk_all[["Maximum disease activity"]]$four$plot
+sk_all[["Max response"]]$pathway$plot
+sk_all[["Max response"]]$gene$plot
+p2<-sk_all[["Max response"]]$four$plot
+
+library(patchwork)
+p1/p2
