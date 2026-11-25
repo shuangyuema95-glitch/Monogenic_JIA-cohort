@@ -478,17 +478,23 @@ View(res$prop_table)
 plot_pheno_heatmap_by_patient <- function(clin_path, sys_order,
                                           pat_cols = NULL,
                                           ann_colors = NULL,
+                                          gene_map = NULL,
+                                          gene_order = NULL,
+                                          label_gene = TRUE,
                                           delay_mode = c("bin", "continuous"),
                                           delay_breaks = c(0, 0.25, 1, 3, 5, Inf),
                                           delay_labels = c("<=0.25y", "0.25-1y", "1-3y", "3-5y", ">=5y"),
                                           delay_pal = c("#F7F7F7", "#FFEFC1", "#FEC260", "#F1BAAB", "#EC706E"),
-                                          sex_pal = c(male = "#6699CC", female = "#EC706E"),
+                                          sex_pal = c("Male" = "#6699CC", "Female" = "#86C7B4"),
                                           color_present = "#BB0021", color_absent = "gray90",
                                           color_na = "grey45", border_color = "white",
+                                          gap_bigpts = 1.5,
+                                          strip_border = FALSE,
                                           drop_empty_feature = TRUE, annotate_system = TRUE,
-                                          cluster_cols = FALSE,
-                                          cellheight = 8.3, cellwidth = 11.5) {
-  library(openxlsx); library(pheatmap)
+                                          cluster_cols = FALSE, fontsize_row = 9,
+                                          cellheight = 7.2, cellwidth = 12,
+                                          silent = FALSE) {
+  library(openxlsx); library(pheatmap); library(grid)
   delay_mode <- match.arg(delay_mode)
   
   clin <- read.xlsx(clin_path, colNames = TRUE)
@@ -524,7 +530,10 @@ plot_pheno_heatmap_by_patient <- function(clin_path, sys_order,
     as.character(unlist(v))
   }
   to_num <- function(v) suppressWarnings(as.numeric(gsub("[^0-9.]", "", v)))
-  sex   <- get_row("Sex")
+  
+  sex <- get_row("Sex")
+  sex <- ifelse(grepl("^m", sex, ignore.case = TRUE), "Male",
+                ifelse(grepl("^f", sex, ignore.case = TRUE), "Female", NA))
   onset <- to_num(get_row("Age of onset (year)"))
   dx    <- to_num(get_row("Age of diagnosis (year)"))
   delay <- as.numeric(ifelse(is.na(onset) | is.na(dx), NA_real_, dx - onset))
@@ -541,8 +550,33 @@ plot_pheno_heatmap_by_patient <- function(clin_path, sys_order,
   ann_row <- data.frame(Sex = factor(sex, levels = names(sex_pal)),
                         "Diagnostic delay" = delay_var,
                         row.names = pat_cols, check.names = FALSE)
-  ann_row <- ann_row[pat_cols, , drop = FALSE]
-  mat <- mat[pat_cols, , drop = FALSE]
+  
+  gene <- setNames(rep(NA_character_, length(pat_cols)), pat_cols)
+  if (!is.null(gene_map)) {
+    gm <- as.data.frame(gene_map, stringsAsFactors = FALSE)
+    gm$ID <- as.character(gm$ID); gm$gene <- as.character(gm$gene)
+    ok <- gm$ID %in% pat_cols
+    gene[gm$ID[ok]] <- gm$gene[ok]
+  }
+  g_lab <- ifelse(is.na(gene), "Unknown", gene)
+  glev <- if (!is.null(gene_map)) unique(gm$gene) else unique(g_lab)
+  if (!is.null(gene_order)) glev <- c(intersect(gene_order, glev), setdiff(glev, gene_order))
+  glev <- c(glev, setdiff(unique(g_lab), glev))
+  ord <- order(match(g_lab, glev), as.integer(sub("^P", "", pat_cols)))
+  
+  pat_ord <- pat_cols[ord]
+  g_ord   <- g_lab[ord]
+  mat     <- mat[pat_ord, , drop = FALSE]
+  ann_row <- ann_row[pat_ord, , drop = FALSE]
+  
+  rn <- if (label_gene) {
+    ifelse(g_ord == "Unknown", pat_ord, paste0(pat_ord, "_", g_ord))
+  } else pat_ord
+  rownames(mat) <- rn
+  rownames(ann_row) <- rn
+  
+  tab_g <- table(factor(g_ord, levels = unique(g_ord)))
+  gaps_row <- if (length(tab_g) > 1) cumsum(tab_g)[-length(tab_g)] else NULL
   
   ann_col <- if (annotate_system) data.frame(System = feat_df$system, row.names = rownames(feat_df)) else NULL
   
@@ -557,23 +591,62 @@ plot_pheno_heatmap_by_patient <- function(clin_path, sys_order,
       "Cardiovascular system" = "#AF478A", "Urinary system" = "#CBDAA9")
   }
   
+  if (!is.null(gaps_row) && !is.null(gap_bigpts)) {
+    ns <- asNamespace("pheatmap")
+    fc0 <- tryCatch(get("find_coordinates", envir = ns), error = function(e) NULL)
+    if (!is.null(fc0)) {
+      gpt <- gap_bigpts
+      fc1 <- function(n, gaps, m = 1:n) {
+        if (length(gaps) == 0) return(list(coord = unit(m / n, "npc"), size = unit(1 / n, "npc")))
+        if (max(gaps) > n) stop("Gaps do not match with matrix size")
+        size <- (1 / n) * (unit(1, "npc") - length(gaps) * unit(gpt, "bigpts"))
+        gaps2 <- apply(sapply(gaps, function(gap, x) x > gap, m), 1, sum)
+        list(coord = m * size + (gaps2 * unit(gpt, "bigpts")), size = size)
+      }
+      assignInNamespace("find_coordinates", fc1, ns = "pheatmap")
+      on.exit(assignInNamespace("find_coordinates", fc0, ns = "pheatmap"), add = TRUE)
+    }
+  }
+  
   p <- pheatmap(mat,
                 cluster_rows = FALSE, cluster_cols = cluster_cols,
-                gaps_col = gaps_col,
+                gaps_row = gaps_row, gaps_col = gaps_col,
                 color = colorRampPalette(c(color_absent, color_present))(100),
                 na_col = color_na,
                 annotation_row = ann_row, annotation_col = ann_col,
                 annotation_colors = ann_colors,
                 annotation_legend = TRUE, border_color = border_color,
-                fontsize_row = 9, fontsize_col = 6,
-                cellheight = cellheight, cellwidth = cellwidth)
+                fontsize_row = fontsize_row, fontsize_col = 6,
+                cellheight = cellheight, cellwidth = cellwidth,
+                silent = TRUE)
+  
+  gt <- p$gtable
+  if (!strip_border) {
+    kill_col <- function(gb) {
+      if (inherits(gb, "gTree")) {
+        gb$children <- lapply(gb$children, kill_col)
+        return(gb)
+      }
+      if (!is.null(gb$gp) && !is.null(gb$gp$col)) gb$gp$col <- NA
+      gb
+    }
+    for (nm in c("row_annotation", "col_annotation", "annotation_legend")) {
+      k <- which(gt$layout$name == nm)
+      if (length(k)) gt$grobs[[k[1]]] <- kill_col(gt$grobs[[k[1]]])
+    }
+    p$gtable <- gt
+  }
+  if (!silent) { grid.newpage(); grid.draw(gt) }
   
   list(plot = p, mat = mat, ann_row = ann_row, ann_col = ann_col,
-       feature_order = feat_df, gaps_col = gaps_col)
+       feature_order = feat_df, gaps_col = gaps_col, gaps_row = gaps_row,
+       pat_order = rn)
 }
+library(openxlsx)
+metainfo<-read.xlsx("E:/Cohort PPT/JIA/0903_Clean case.xlsx")
 
 res_pat <- plot_pheno_heatmap_by_patient(
   clin_path = "E:/Cohort PPT/JIA/code/Clinical data.xlsx",
-  sys_order = sys_order, delay_mode = "bin")
-res_pat$plot
-
+  sys_order = sys_order, delay_mode = "bin",
+  gene_map = metainfo %>% arrange(gene) %>% select(ID, gene),
+  gap_bigpts = 1.23)
