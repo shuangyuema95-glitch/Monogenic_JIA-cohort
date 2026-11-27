@@ -29,7 +29,7 @@ print(addmargins(n_tab))
 print(apply(n_tab, 2, function(x) sum(x >= MinCells)))
 
 ######3 Cellchat subject construction
-options(future.globals.maxSize = 4 * 1024^3)
+options(future.globals.maxSize = 8 * 1024^3)
 setwd("E:\\Cohort PPT\\JIA\\code\\CellCom")
 chat_list <- list()
 for (g in mut_levels) {
@@ -68,6 +68,8 @@ slotNames(chat_merge)
 names(chat_list$HC@net)
 dim(chat_merge@net$HC$count)
 packageVersion("CellChat")
+
+chat_merge<-readRDS("JIA_cellchat_mutation7_merge.RDS")
 
 ######5 Overall interaction number and strength
 col_one <- "#6699CC"
@@ -463,190 +465,366 @@ pg <- bipartite_grid(
   lab_full  = lab_full)
 pg
  
-####9.1 revised
-library(igraph)
-library(ggraph)
-library(patchwork)
+#####10 Ligand-receptor interaction probability analysis
+#####1 load packages and standardize LR columns
+library(data.table); library(openxlsx); library(ggplot2); library(patchwork)
 
-celltype_levels <- c("Naive CD4 T","Memory CD4 T","Naive CD8 T","NK","Treg","Cytotoxic CD8 T",
-                     "γδT","Naive B","Memory B","Plasma","CD14 Monocyte","CD16 Monocyte","pDC",
-                     "Platelet","Erythrocyte")
-cell_color_vec <- c("#847AB3","#96AF95","#6699CC","#86C7B4","#007ABA","#9CD2ED",
-                    "#F1BAAB","#BB0021","#D9C2D9","#FEC260","#AF478A","#EC706E",
-                    "#B5BBE3","#E2A9C9","#CBDAA9")
-color_ct2 <- setNames(cell_color_vec, celltype_levels)[ct_keep]
-
-empty_panel <- function(msg, ttl = NULL){
-  p <- ggplot() + annotate("text", x = 0, y = 0, label = msg, size = 3, colour = "grey45") +
-    theme_void() + theme(plot.margin = margin(12, 16, 6, 16))
-  if(!is.null(ttl)) p <- p + ggtitle(ttl) +
-      theme(plot.title = element_text(size = 7, hjust = 0.5, lineheight = 0.95, colour = "black")) +
-      theme(plot.margin = margin(4, 16, 6, 16))
-  p
-}
-
-pw_stats <- function(path, ct = ct_keep){
-  vals <- numeric(0); mx <- numeric(0)
-  for(g in names(chat_list)){
-    cc <- chat_list[[g]]; idx <- which(cc@netP$pathways == path)
-    if(!length(idx)) next
-    m <- cc@netP$prob[, , idx]
-    m <- m[intersect(rownames(m), ct), intersect(colnames(m), ct), drop = FALSE]
-    vals <- c(vals, m[m > 0]); mx <- c(mx, max(m, na.rm = TRUE))
+std_lr <- function(df) {
+  df <- as.data.table(df)
+  if ("probability" %in% names(df)) setnames(df, "probability", "prob")
+  if ("pval" %in% names(df))       setnames(df, "pval", "p_value")
+  if (!"p_value" %in% names(df))   df$p_value <- NA_real_
+  if ("from" %in% names(df) && !"ligand" %in% names(df))   setnames(df, "from", "ligand")
+  if ("to"   %in% names(df) && !"receptor" %in% names(df)) setnames(df, "to",   "receptor")
+  if (is.null(df$interaction_name_2)) {
+    df$interaction_name_2 <- if (!is.null(df$interaction_name)) df$interaction_name
+    else paste(df$ligand, df$receptor, sep = "–")
   }
-  list(vals = vals, max = if(length(mx)) max(mx, na.rm = TRUE) else 0)
+  df
 }
 
-bipartite_net <- function(cc, path = NULL, ct = ct_keep, thr = NULL, w_max = NULL,
-                          ttl = NULL, label_size = 2.2){
-  if(is.null(path)) m <- cc@net$weight else {
-    idx <- which(cc@netP$pathways == path)
-    if(!length(idx)) return(empty_panel("pathway absent", ttl))
-    m <- cc@netP$prob[, , idx]
-  }
-  m <- m[intersect(rownames(m), ct), intersect(colnames(m), ct), drop = FALSE]
-  tot <- sum(m, na.rm = TRUE)
-  if(is.null(thr)) thr <- quantile(m[m > 0], 0.90, na.rm = TRUE)
-  m[m < thr] <- 0
-  ed <- as.data.frame(as.table(m), stringsAsFactors = FALSE)
-  names(ed) <- c("s","t","w")
-  ed <- ed[ed$w > 0 & ed$s != ed$t, ]
-  if(!nrow(ed))
-    return(empty_panel(paste0("all edges < ", signif(thr, 2), "\npathway total = ", signif(tot, 2)), ttl))
-  if(is.null(w_max)) w_max <- max(ed$w)
-  
-  yv <- setNames(seq(1, 0, length.out = length(ct)), ct)
-  ls <- unique(ed$s); lt <- unique(ed$t)
-  nd <- rbind(
-    data.frame(name = paste0(ls, "__s"), label = ls, side = "s", x = 0, y = unname(yv[ls]),
-               stringsAsFactors = FALSE),
-    data.frame(name = paste0(lt, "__t"), label = lt, side = "t", x = 1, y = unname(yv[lt]),
-               stringsAsFactors = FALSE))
-  ed$from <- paste0(ed$s, "__s"); ed$to <- paste0(ed$t, "__t")
-  g <- graph_from_data_frame(ed[, c("from","to","w","s")], vertices = nd, directed = TRUE)
-  
-  p <- ggraph(g, layout = "manual", x = nd$x, y = nd$y) +
-    geom_edge_link(aes(edge_width = w, edge_colour = s), alpha = 0.75,
-                   end_cap = circle(5, "mm"), start_cap = circle(5, "mm"),
-                   arrow = arrow(angle = 18, length = unit(2, "mm"), type = "closed")) +
-    geom_node_point(aes(filter = side == "s", colour = label), size = 3.6) +
-    geom_node_point(aes(filter = side == "t", colour = label), size = 3.0,
-                    shape = 21, fill = NA, stroke = 0.8) +
-    geom_node_text(aes(filter = side == "s", label = label), nudge_x = -0.05, hjust = 1,
-                   size = label_size, colour = "grey20") +
-    geom_node_text(aes(filter = side == "t", label = label), nudge_x = 0.05, hjust = 0,
-                   size = label_size, colour = "grey20") +
-    scale_edge_width(range = c(0.25, 2.4), limits = c(0, w_max), guide = "none") +
-    scale_edge_colour_manual(values = color_ct2, guide = "none") +
-    scale_colour_manual(values = color_ct2, guide = "none") +
-    coord_cartesian(xlim = c(-0.42, 1.42), clip = "off") +
-    theme_void() + theme(plot.margin = margin(4, 16, 6, 16))
-  if(!is.null(ttl)) p <- p + ggtitle(ttl) +
-    theme(plot.title = element_text(size = 7, hjust = 0.5, lineheight = 0.95, colour = "black"))
-  p
-}
-
-sel_ok <- c("MHC-I","MHC-II","CLEC","CCL","GALECTIN","ICAM","ITGB2","SELPLG","ADGRE5","TGFb","CD6","IFN-II","IL6","IL1","TNF")
-sel_ok <- sel_ok[sel_ok %in% unique(unlist(lapply(chat_list, function(cc) cc@netP$pathways)))]
-floor_abs <- 1e-3
-
-grp_all <- names(chat_list)
-path_sets <- split(sel_ok, ceiling(seq_along(sel_ok) / 3))
-
-pdf("CC_bipartite_globalThr.pdf", width = 30, height = 14)
-for(chunk in path_sets){
-  plots <- list()
-  for(s in chunk){
-    st <- pw_stats(s)
-    thr_s <- max(quantile(st$vals, 0.90, na.rm = TRUE), floor_abs)
-    plots <- c(plots, lapply(grp_all, function(g)
-      bipartite_net(chat_list[[g]], path = s, thr = thr_s, w_max = st$max,
-                    ttl = paste0(s, "\n", lab_full[g]))))
-  }
-  print(wrap_plots(plots, ncol = 7))
-}
-dev.off()
-
-
-####check data
-st    <- pw_stats("IL1")     
-q90   <- quantile(st$vals, 0.90, na.rm = TRUE)   
-thr_s <- max(q90, 1e-3)                         
-
-
-#######9.2 circos changed
-pw_max <- function(path, ct = ct_keep){
-  mx <- 0
-  for(g in names(chat_list)){
-    cc <- chat_list[[g]]; idx <- which(cc@netP$pathways == path)
-    if(!length(idx)) next
-    m <- cc@netP$prob[, , idx]
-    m <- m[intersect(rownames(m), ct), intersect(colnames(m), ct), drop = FALSE]
-    mx <- max(mx, max(m, na.rm = TRUE))
-  }
-  mx
-}
-
-bipartite_net <- function(cc, path = NULL, ct = ct_keep, q = 0.90, w_max = NULL, ttl = NULL) {
-  if (is.null(path)) {
-    m <- cc@net$weight
+#####2 analysis function: extract LR-pair long table from one CellChat object
+cc_lr_table <- function(cc, receiver, sender = NULL, signaling = NULL, group = NULL) {
+  df <- std_lr(subsetCommunication(cc))
+  df <- df[target == receiver]
+  if (is.null(sender)) {
+    sender <- setdiff(unique(df$source), receiver)
   } else {
-    idx <- which(cc@netP$pathways == path)
-    if (!length(idx)) return(NULL)
-    m <- cc@netP$prob[, , idx]
+    sender <- intersect(sender, unique(df$source))
   }
-  m <- m[intersect(rownames(m), ct), intersect(colnames(m), ct), drop = FALSE]
-  thr <- quantile(m[m > 0], q, na.rm = TRUE)
-  m[m < thr] <- 0
-  ed <- as.data.frame(as.table(m), stringsAsFactors = FALSE)
-  names(ed) <- c("s", "t", "w")
-  ed <- ed[ed$w > 0 & ed$s != ed$t, ]
-  if (!nrow(ed)) return(NULL)
-  if (is.null(w_max) || !is.finite(w_max) || w_max <= 0) w_max <- max(ed$w)
-  lib <- sort(unique(ed$s)); tib <- sort(unique(ed$t))
-  nd <- data.frame(
-    name  = c(paste0(lib, "__s"), paste0(tib, "__t")),
-    label = c(lib, tib),
-    side  = rep(c("s", "t"), c(length(lib), length(tib)))
-  )
-  yv <- setNames(seq(1, 0, length.out = length(union(lib, tib))), union(lib, tib))
-  nd$y <- yv[nd$label]
-  nd$x <- ifelse(nd$side == "s", 0, 1)
-  ed$from <- paste0(ed$s, "__s"); ed$to <- paste0(ed$t, "__t")
-  g <- graph_from_data_frame(ed[, c("from", "to", "w", "s")], vertices = nd, directed = TRUE)
-  p <- ggraph(g, layout = "manual", x = nd$x, y = nd$y) +
-    geom_edge_link(aes(edge_width = w, edge_colour = s),
-                   alpha = 0.75, end_cap = circle(5, "mm"), start_cap = circle(5, "mm"),
-                   arrow = arrow(angle = 18, length = unit(2, "mm"), type = "closed")) +
-    geom_node_point(aes(filter = side == "s", colour = label), size = 4.5) +
-    geom_node_point(aes(filter = side == "t", colour = label), size = 3.5, shape = 21, fill = NA, stroke = 1) +
-    geom_node_text(aes(filter = side == "s", label = label), nudge_x = -0.05, hjust = 1, size = 2.5) +
-    geom_node_text(aes(filter = side == "t", label = label), nudge_x = 0.05, hjust = 0, size = 2.5) +
-    scale_edge_width(range = c(0.3, 2.6), limits = c(0, w_max), guide = "none") +
-    scale_edge_colour_manual(values = color_ct2, guide = "none") +
-    scale_colour_manual(values = color_ct2, guide = "none") +
-    coord_cartesian(xlim = c(-0.5, 1.5), clip = "off") +
-    theme_void() + theme(plot.margin = margin(15, 20, 8, 20))
-  if (!is.null(ttl)) p <- p + ggtitle(ttl)
+  df <- df[source %in% sender]
+  if (!is.null(signaling)) df <- df[pathway_name %in% signaling]
+  df <- df[is.finite(prob) & prob > 0]
+  if (!is.null(group)) df$group <- group
+  df
+}
+
+#####3 define sender-receiver pairs, export full table sorted by prob
+pairs_def <- list(
+  LPIN2_CD14_CD8T_NK = list(mut = "I67R",  receiver = "CD14 Monocyte",
+                            senders = c("Cytotoxic CD8 T", "NK")),
+  PSTPIP1_CD14_CD16  = list(mut = "E250K", receiver = "CD14 Monocyte",
+                            senders = c("CD16 Monocyte")),
+  PSTPIP1_CD14_pDC   = list(mut = "E250K", receiver = "CD14 Monocyte",
+                            senders = c("pDC")))
+
+lr_export <- lapply(pairs_def, function(cfg) {
+  d_hc  <- cc_lr_table(chat_list[["HC"]], cfg$receiver, cfg$senders, group = "HC")
+  d_mut <- cc_lr_table(chat_list[[cfg$mut]], cfg$receiver, cfg$senders, group = cfg$mut)
+  d <- rbind(d_hc, d_mut)
+  d$xlab <- paste(d$group, d$source, sep = " | ")
+  d[order(-prob)]
+})
+
+for (nm in names(lr_export)) {
+  cat("\n=== ", nm, " | n=", nrow(lr_export[[nm]]), " ===\n", sep = "")
+  print(lr_export[[nm]][, intersect(c("group", "source", "target", "pathway_name",
+                                      "ligand", "receptor", "interaction_name_2", "prob", "p_value"), names(lr_export[[nm]])),
+                        with = FALSE])
+}
+
+openxlsx::write.xlsx(lr_export, file = "CellChat_LR_pair_all.xlsx")
+
+#####4 plot LR bubble charts from exported table
+# (1) read exported long table for plotting
+xlsx_path <- "CellChat_LR_pair_all.xlsx"
+lr_s1 <- std_lr(openxlsx::read.xlsx(xlsx_path, sheet = "LPIN2_CD14_CD8T_NK", check.names = FALSE))
+lr_s2 <- std_lr(openxlsx::read.xlsx(xlsx_path, sheet = "PSTPIP1_CD14_CD16",  check.names = FALSE))
+lr_s3 <- std_lr(openxlsx::read.xlsx(xlsx_path, sheet = "PSTPIP1_CD14_pDC",   check.names = FALSE))
+lr_s1[, prob := as.numeric(prob)]; lr_s2[, prob := as.numeric(prob)]; lr_s3[, prob := as.numeric(prob)]
+
+# (2) whitelisted pairs per panel
+pairs_g1 <- c(
+  "CD99 - CD99", "CD99 - PILRA", "CCL5 - CCR1", "ADGRE5 - CD55", "ITGB2 - ICAM1",
+  "IFNG - (IFNGR1+IFNGR2)", "ICAM1 - (ITGAL+ITGB2)", "CCL5 - CCR5", "CCL5 - CCR3",
+  "CCL4 - CCR5", "CCL3 - CCR1", "CD6 - ALCAM", "SEMA4D - PLXNB2"
+)
+pairs_g2 <- c(
+  "CD99 - CD99", "CD99 - PILRA", "ADGRE5 - CD55", "CCL5 - CCR1", "ITGB2 - ICAM1",
+  "IFNG - (IFNGR1+IFNGR2)", "ICAM1 - (ITGAX+ITGB2)", "ICAM1 - (ITGAL+ITGB2)",
+  "CCL5 - CCR5", "CCL5 - CCR3", "SEMA4D - PLXNB2", "CCL4 - CCR5", "CCL3 - CCR1"
+)
+pairs_g3 <- c(
+  "LGALS9 - CD45", "PECAM1 - PECAM1", "HLA-DRA - CD4", "HLA-DPA1 - CD4", "HLA-DPB1 - CD4",
+  "LGALS9 - CD44", "HLA-DRB1 - CD4", "IL1B - (IL1R1+IL1RAP)", "IL1B - IL1R2",
+  "IL1A - (IL1R1+IL1RAP)", "IL1A - IL1R2"
+)
+pairs_g4 <- c(
+  "HLA-DRA - CD4", "LGALS9 - CD45", "HLA-DPA1 - CD4", "HLA-DPB1 - CD4", "HLA-DMA - CD4",
+  "HLA-DQA1 - CD4", "HLA-DQB1 - CD4", "IL1B - (IL1R1+IL1RAP)", "IL1B - IL1R2",
+  "IL1A - (IL1R1+IL1RAP)", "IL1A - IL1R2"
+)
+
+panels <- list(
+  list(df = lr_s1, sender = "Cytotoxic CD8 T", receiver = "CD14 Monocyte",
+       g_hc = "HC", g_mut = "I67R", pairs = pairs_g1,
+       title = "Cytotoxic CD8 T -> CD14 | HC vs I67R"),
+  list(df = lr_s1, sender = "NK", receiver = "CD14 Monocyte",
+       g_hc = "HC", g_mut = "I67R", pairs = pairs_g2,
+       title = "NK -> CD14 | HC vs I67R"),
+  list(df = lr_s2, sender = "CD16 Monocyte", receiver = "CD14 Monocyte",
+       g_hc = "HC", g_mut = "E250K", pairs = pairs_g3,
+       title = "CD16 Monocyte -> CD14 | HC vs E250K"),
+  list(df = lr_s3, sender = "pDC", receiver = "CD14 Monocyte",
+       g_hc = "HC", g_mut = "E250K", pairs = pairs_g4,
+       title = "pDC -> CD14 | HC vs E250K")
+)
+
+# (3) bubble plot function, linear and log10 scale
+# (3) bubble plot function, linear and log10 scale
+grad_default <- colorRampPalette(c("#007ABA", "#F7F7F7", "#BB0021"))(101)
+
+LR_bubble <- function(dat, sender, receiver, g_hc, g_mut, pairs, title,
+                      scale = c("log10", "linear"),
+                      grad_cols = grad_default,
+                      point_outline = TRUE,
+                      point_colour = "black",
+                      size_range = c(1.5, 7), y_text_size = 8) {
+  scale <- match.arg(scale)
+  d <- dat[source == sender & target == receiver &
+             group %in% c(g_hc, g_mut) & interaction_name_2 %in% pairs]
+  d[, group := factor(group, levels = c(g_hc, g_mut))]
+  d[, interaction_name_2 := factor(interaction_name_2, levels = rev(pairs))]
+  
+  if (scale == "log10") {
+    d[, prob_plot := ifelse(prob > 0, log10(prob), NA_real_)]
+    fill_lab <- "log10(prob)"
+  } else {
+    d[, prob_plot := prob]
+    fill_lab <- "prob"
+  }
+  
+  if (isTRUE(point_outline)) {
+    pt_layer <- geom_point(aes(fill = prob_plot, size = prob_plot), shape = 21,
+                           colour = point_colour, stroke = 0.3, na.rm = TRUE)
+    pt_scale <- scale_fill_gradientn(colours = grad_cols, name = fill_lab)
+  } else {
+    pt_layer <- geom_point(aes(colour = prob_plot, size = prob_plot), shape = 19,
+                           na.rm = TRUE)
+    pt_scale <- scale_colour_gradientn(colours = grad_cols, name = fill_lab)
+  }
+  
+  p <- ggplot(d, aes(x = group, y = interaction_name_2)) +
+    pt_layer + pt_scale +
+    scale_size_continuous(range = size_range, guide = "none") +
+    theme_bw(base_size = 11) +
+    theme(
+      panel.grid.major = element_line(linetype = "dashed", colour = "grey88"),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(colour = "black", fill = NA),
+      axis.text.x = element_text(angle = 0, hjust = 0.5, colour = "black", size = 10),
+      axis.text.y = element_text(colour = "black", size = y_text_size),
+      axis.title = element_blank(),
+      legend.title = element_text(colour = "black", size = 8),
+      legend.text = element_text(colour = "black", size = 8),
+      legend.key.size = unit(0.35, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      plot.margin = margin(4, 6, 4, 6),
+      plot.title = element_text(colour = "black", size = 10)
+    ) +
+    labs(title = title)
+  p$data <- as.data.frame(d)
   p
 }
 
-grp_all <- names(chat_list)
-path_sets <- split(sel, ceiling(seq_along(sel) / 3))
+lin_plots <- lapply(panels, function(cf) {
+  LR_bubble(cf$df, cf$sender, cf$receiver, cf$g_hc, cf$g_mut, cf$pairs, cf$title,
+            scale = "linear", point_outline = TRUE)
+})
+lin_row <- wrap_plots(lin_plots, nrow = 1, guides = "collect")
+lin_row
 
-pdf("CC_bipartite.pdf", width = 28, height = 13.5)
-for (chunk in path_sets) {
-  plots <- list()
-  for (s in chunk) {
-    wm <- pw_max(s)
-    ps <- lapply(grp_all, function(g) {
-      bipartite_net(chat_list[[g]], path = s, w_max = wm,
-                    ttl = paste0(s, "\n", lab_full[g]))
-    })
-    ps <- ps[!sapply(ps, is.null)]
-    plots <- c(plots, ps)
-  }
-  if (length(plots)) print(wrap_plots(plots, ncol = 7))
-}
-dev.off()
+log_plots <- lapply(panels, function(cf) {
+  LR_bubble(cf$df, cf$sender, cf$receiver, cf$g_hc, cf$g_mut, cf$pairs, cf$title,
+            scale = "log10", point_outline = FALSE)
+})
+log_row <- wrap_plots(log_plots, nrow = 1, guides = "collect")
+log_row
 
+# ####9.1 revised
+# library(igraph)
+# library(ggraph)
+# library(patchwork)
+# 
+# celltype_levels <- c("Naive CD4 T","Memory CD4 T","Naive CD8 T","NK","Treg","Cytotoxic CD8 T",
+#                      "γδT","Naive B","Memory B","Plasma","CD14 Monocyte","CD16 Monocyte","pDC",
+#                      "Platelet","Erythrocyte")
+# cell_color_vec <- c("#847AB3","#96AF95","#6699CC","#86C7B4","#007ABA","#9CD2ED",
+#                     "#F1BAAB","#BB0021","#D9C2D9","#FEC260","#AF478A","#EC706E",
+#                     "#B5BBE3","#E2A9C9","#CBDAA9")
+# color_ct2 <- setNames(cell_color_vec, celltype_levels)[ct_keep]
+# 
+# empty_panel <- function(msg, ttl = NULL){
+#   p <- ggplot() + annotate("text", x = 0, y = 0, label = msg, size = 3, colour = "grey45") +
+#     theme_void() + theme(plot.margin = margin(12, 16, 6, 16))
+#   if(!is.null(ttl)) p <- p + ggtitle(ttl) +
+#       theme(plot.title = element_text(size = 7, hjust = 0.5, lineheight = 0.95, colour = "black")) +
+#       theme(plot.margin = margin(4, 16, 6, 16))
+#   p
+# }
+# 
+# pw_stats <- function(path, ct = ct_keep){
+#   vals <- numeric(0); mx <- numeric(0)
+#   for(g in names(chat_list)){
+#     cc <- chat_list[[g]]; idx <- which(cc@netP$pathways == path)
+#     if(!length(idx)) next
+#     m <- cc@netP$prob[, , idx]
+#     m <- m[intersect(rownames(m), ct), intersect(colnames(m), ct), drop = FALSE]
+#     vals <- c(vals, m[m > 0]); mx <- c(mx, max(m, na.rm = TRUE))
+#   }
+#   list(vals = vals, max = if(length(mx)) max(mx, na.rm = TRUE) else 0)
+# }
+# 
+# bipartite_net <- function(cc, path = NULL, ct = ct_keep, thr = NULL, w_max = NULL,
+#                           ttl = NULL, label_size = 2.2){
+#   if(is.null(path)) m <- cc@net$weight else {
+#     idx <- which(cc@netP$pathways == path)
+#     if(!length(idx)) return(empty_panel("pathway absent", ttl))
+#     m <- cc@netP$prob[, , idx]
+#   }
+#   m <- m[intersect(rownames(m), ct), intersect(colnames(m), ct), drop = FALSE]
+#   tot <- sum(m, na.rm = TRUE)
+#   if(is.null(thr)) thr <- quantile(m[m > 0], 0.90, na.rm = TRUE)
+#   m[m < thr] <- 0
+#   ed <- as.data.frame(as.table(m), stringsAsFactors = FALSE)
+#   names(ed) <- c("s","t","w")
+#   ed <- ed[ed$w > 0 & ed$s != ed$t, ]
+#   if(!nrow(ed))
+#     return(empty_panel(paste0("all edges < ", signif(thr, 2), "\npathway total = ", signif(tot, 2)), ttl))
+#   if(is.null(w_max)) w_max <- max(ed$w)
+#   
+#   yv <- setNames(seq(1, 0, length.out = length(ct)), ct)
+#   ls <- unique(ed$s); lt <- unique(ed$t)
+#   nd <- rbind(
+#     data.frame(name = paste0(ls, "__s"), label = ls, side = "s", x = 0, y = unname(yv[ls]),
+#                stringsAsFactors = FALSE),
+#     data.frame(name = paste0(lt, "__t"), label = lt, side = "t", x = 1, y = unname(yv[lt]),
+#                stringsAsFactors = FALSE))
+#   ed$from <- paste0(ed$s, "__s"); ed$to <- paste0(ed$t, "__t")
+#   g <- graph_from_data_frame(ed[, c("from","to","w","s")], vertices = nd, directed = TRUE)
+#   
+#   p <- ggraph(g, layout = "manual", x = nd$x, y = nd$y) +
+#     geom_edge_link(aes(edge_width = w, edge_colour = s), alpha = 0.75,
+#                    end_cap = circle(5, "mm"), start_cap = circle(5, "mm"),
+#                    arrow = arrow(angle = 18, length = unit(2, "mm"), type = "closed")) +
+#     geom_node_point(aes(filter = side == "s", colour = label), size = 3.6) +
+#     geom_node_point(aes(filter = side == "t", colour = label), size = 3.0,
+#                     shape = 21, fill = NA, stroke = 0.8) +
+#     geom_node_text(aes(filter = side == "s", label = label), nudge_x = -0.05, hjust = 1,
+#                    size = label_size, colour = "grey20") +
+#     geom_node_text(aes(filter = side == "t", label = label), nudge_x = 0.05, hjust = 0,
+#                    size = label_size, colour = "grey20") +
+#     scale_edge_width(range = c(0.25, 2.4), limits = c(0, w_max), guide = "none") +
+#     scale_edge_colour_manual(values = color_ct2, guide = "none") +
+#     scale_colour_manual(values = color_ct2, guide = "none") +
+#     coord_cartesian(xlim = c(-0.42, 1.42), clip = "off") +
+#     theme_void() + theme(plot.margin = margin(4, 16, 6, 16))
+#   if(!is.null(ttl)) p <- p + ggtitle(ttl) +
+#     theme(plot.title = element_text(size = 7, hjust = 0.5, lineheight = 0.95, colour = "black"))
+#   p
+# }
+# 
+# sel_ok <- c("MHC-I","MHC-II","CLEC","CCL","GALECTIN","ICAM","ITGB2","SELPLG","ADGRE5","TGFb","CD6","IFN-II","IL6","IL1","TNF")
+# sel_ok <- sel_ok[sel_ok %in% unique(unlist(lapply(chat_list, function(cc) cc@netP$pathways)))]
+# floor_abs <- 1e-3
+# 
+# grp_all <- names(chat_list)
+# path_sets <- split(sel_ok, ceiling(seq_along(sel_ok) / 3))
+# 
+# pdf("CC_bipartite_globalThr.pdf", width = 30, height = 14)
+# for(chunk in path_sets){
+#   plots <- list()
+#   for(s in chunk){
+#     st <- pw_stats(s)
+#     thr_s <- max(quantile(st$vals, 0.90, na.rm = TRUE), floor_abs)
+#     plots <- c(plots, lapply(grp_all, function(g)
+#       bipartite_net(chat_list[[g]], path = s, thr = thr_s, w_max = st$max,
+#                     ttl = paste0(s, "\n", lab_full[g]))))
+#   }
+#   print(wrap_plots(plots, ncol = 7))
+# }
+# dev.off()
+# 
+# 
+# ####check data
+# st    <- pw_stats("IL1")     
+# q90   <- quantile(st$vals, 0.90, na.rm = TRUE)   
+# thr_s <- max(q90, 1e-3)                         
+# 
+# 
+# #######9.2 circos changed
+# pw_max <- function(path, ct = ct_keep){
+#   mx <- 0
+#   for(g in names(chat_list)){
+#     cc <- chat_list[[g]]; idx <- which(cc@netP$pathways == path)
+#     if(!length(idx)) next
+#     m <- cc@netP$prob[, , idx]
+#     m <- m[intersect(rownames(m), ct), intersect(colnames(m), ct), drop = FALSE]
+#     mx <- max(mx, max(m, na.rm = TRUE))
+#   }
+#   mx
+# }
+# 
+# bipartite_net <- function(cc, path = NULL, ct = ct_keep, q = 0.90, w_max = NULL, ttl = NULL) {
+#   if (is.null(path)) {
+#     m <- cc@net$weight
+#   } else {
+#     idx <- which(cc@netP$pathways == path)
+#     if (!length(idx)) return(NULL)
+#     m <- cc@netP$prob[, , idx]
+#   }
+#   m <- m[intersect(rownames(m), ct), intersect(colnames(m), ct), drop = FALSE]
+#   thr <- quantile(m[m > 0], q, na.rm = TRUE)
+#   m[m < thr] <- 0
+#   ed <- as.data.frame(as.table(m), stringsAsFactors = FALSE)
+#   names(ed) <- c("s", "t", "w")
+#   ed <- ed[ed$w > 0 & ed$s != ed$t, ]
+#   if (!nrow(ed)) return(NULL)
+#   if (is.null(w_max) || !is.finite(w_max) || w_max <= 0) w_max <- max(ed$w)
+#   lib <- sort(unique(ed$s)); tib <- sort(unique(ed$t))
+#   nd <- data.frame(
+#     name  = c(paste0(lib, "__s"), paste0(tib, "__t")),
+#     label = c(lib, tib),
+#     side  = rep(c("s", "t"), c(length(lib), length(tib)))
+#   )
+#   yv <- setNames(seq(1, 0, length.out = length(union(lib, tib))), union(lib, tib))
+#   nd$y <- yv[nd$label]
+#   nd$x <- ifelse(nd$side == "s", 0, 1)
+#   ed$from <- paste0(ed$s, "__s"); ed$to <- paste0(ed$t, "__t")
+#   g <- graph_from_data_frame(ed[, c("from", "to", "w", "s")], vertices = nd, directed = TRUE)
+#   p <- ggraph(g, layout = "manual", x = nd$x, y = nd$y) +
+#     geom_edge_link(aes(edge_width = w, edge_colour = s),
+#                    alpha = 0.75, end_cap = circle(5, "mm"), start_cap = circle(5, "mm"),
+#                    arrow = arrow(angle = 18, length = unit(2, "mm"), type = "closed")) +
+#     geom_node_point(aes(filter = side == "s", colour = label), size = 4.5) +
+#     geom_node_point(aes(filter = side == "t", colour = label), size = 3.5, shape = 21, fill = NA, stroke = 1) +
+#     geom_node_text(aes(filter = side == "s", label = label), nudge_x = -0.05, hjust = 1, size = 2.5) +
+#     geom_node_text(aes(filter = side == "t", label = label), nudge_x = 0.05, hjust = 0, size = 2.5) +
+#     scale_edge_width(range = c(0.3, 2.6), limits = c(0, w_max), guide = "none") +
+#     scale_edge_colour_manual(values = color_ct2, guide = "none") +
+#     scale_colour_manual(values = color_ct2, guide = "none") +
+#     coord_cartesian(xlim = c(-0.5, 1.5), clip = "off") +
+#     theme_void() + theme(plot.margin = margin(15, 20, 8, 20))
+#   if (!is.null(ttl)) p <- p + ggtitle(ttl)
+#   p
+# }
+# 
+# grp_all <- names(chat_list)
+# path_sets <- split(sel, ceiling(seq_along(sel) / 3))
+# 
+# pdf("CC_bipartite.pdf", width = 28, height = 13.5)
+# for (chunk in path_sets) {
+#   plots <- list()
+#   for (s in chunk) {
+#     wm <- pw_max(s)
+#     ps <- lapply(grp_all, function(g) {
+#       bipartite_net(chat_list[[g]], path = s, w_max = wm,
+#                     ttl = paste0(s, "\n", lab_full[g]))
+#     })
+#     ps <- ps[!sapply(ps, is.null)]
+#     plots <- c(plots, ps)
+#   }
+#   if (length(plots)) print(wrap_plots(plots, ncol = 7))
+# }
+# dev.off()
+# 
