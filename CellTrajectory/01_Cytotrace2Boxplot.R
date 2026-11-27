@@ -228,21 +228,23 @@ plot_mono_pooled <- function(meta_df, kw_mono_df = NULL, group_colors, group_ord
 }
 
 ######6. run
-res_color_med <- plot_cytotrace2(meta_df, kw_df, group_colors, celltype_levels = celltype_levels,
-                                 mode = "color", hline_stat = "median")
-res_fill_med  <- plot_cytotrace2(meta_df, kw_df, group_colors, celltype_levels = celltype_levels,
+mono_sub_ct <- c("CD14 Monocyte","CD16 Monocyte")
+
+res_fill_med  <- plot_cytotrace2(meta_df, kw_df, group_colors, celltype_levels = mono_sub_ct,
                                  mode = "fill", hline_stat = "median")
-res_fill_mean <- plot_cytotrace2(meta_df, kw_df, group_colors, celltype_levels = celltype_levels,
+res_fill_mean <- plot_cytotrace2(meta_df, kw_df, group_colors, celltype_levels = mono_sub_ct,
                                  mode = "fill", hline_stat = "mean")
+
+stack_med  <- wrap_plots(res_fill_med$plots,  ncol = 1)
+stack_mean <- wrap_plots(res_fill_mean$plots, ncol = 1)
 
 mono_med  <- plot_mono_pooled(meta_df, kw_mono_df, group_colors, group_order = group_levels, hline_stat = "median")
 mono_mean <- plot_mono_pooled(meta_df, kw_mono_df, group_colors, group_order = group_levels, hline_stat = "mean")
 
-wrap_plots(res_fill_med$plots, nrow = 1)
-wrap_plots(res_fill_med$plots, ncol = 1)
-p1 <- res_fill_med$plots$`CD14 Monocyte`; p2 <- res_fill_med$plots$`CD16 Monocyte`; p3 <- res_fill_med$plots$pDC
-p1 / p2 / p3
-print(mono_med); print(mono_mean)
+print(stack_med)
+print(stack_mean)
+print(mono_med)
+print(mono_mean)
 
 ######7. export test results
 library(openxlsx)
