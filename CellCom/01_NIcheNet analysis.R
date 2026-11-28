@@ -104,7 +104,7 @@ nn_fig <- function(x, ligands = NULL, genes = NULL, top_n_lig = 20, top_n_gene =
                    keep_lig = NULL, keep_rec = NULL, keep_tg = NULL,
                    retain = FALSE,
                    w = c(3.0, 7.5, 11), h = c(4.2, 4.4), tile_w = 1, tile_h = 1,
-                   col_lig = "#6699CC", col_target = "#6699CC", col_lr = "#AF478A",
+                   col_lig = "#007ABA", col_target = "#AF478A", col_lr = "#AF478A",
                    col_keep = "#EC706E", col_low = "whitesmoke", x_from = NULL,
                    base_size = 8, title = NULL, file = NULL, width = 15, height = 9) {
   
@@ -273,8 +273,198 @@ for (md in names(fig_all)) {
 }
 
 get_part <- function(p, which = c("A","B","C")) attr(p, "parts")[[match.arg(which)]]
-p1<-get_part(fig_raw$x1, "B")
-p2<-get_part(fig_raw$x2, "B")
+p1<-get_part(fig_ret$x1, "B")
+p2<-get_part(fig_ret$x2, "B")
 
-p3<-get_part(fig_raw$y1, "B")
-p4<-get_part(fig_raw$y1, "B")
+p3<-get_part(fig_ret$y1, "B")
+p4<-get_part(fig_ret$y2, "B")
+
+(p1 | p2) / (p3 | p4) + plot_layout(guides = "collect")
+
+#######6 check gene expressions, produce violin plot for batch
+library(Seurat)
+pbmc1<-readRDS("E:/Cohort PPT/JIA/code/pbmc1.RDS")
+IFN_gene<-c("ADAR","B4GALT5","BMPR2","BTN3A1","BTN3A2","CASP1","CCL5","CD47","CEBPD","CHST11","CITED2","DDX58","DUSP6","ERAP2","FOS","GADD45B","GALNT10","GBP1","GBP2","HLA−A","HLA−C","HLA−DRA","HLA−E","ICAM1","IFI16","IFITM3","IL15","IRF1","IRF2","ISG15","JAK2","JUN","JUNB","KLF4","KLF6","KLF7","LAP3","MAP3K5","MICAL2","MX1","NEDD9","PFKFB3","PLAUR","PLSCR1","PMAIP1","PSMB8","PSME1","PSTPIP2","RBCK1","SECTM1","SMURF2","SOD2","SP100","SP110","STAT1","STAT3","STK38L","TBC1D8","TGFBI","TNFAIP2","TNFSF10","VCAN")
+IL_gene<-c("ADAM19","AHR","ALOX5AP","AMPD3","BHLHE40","BID","BIRC2","BMPR2","CD82","CFLAR","CHST11","DDIT4","ELK3","FOS","HMOX1","ICAM1","IER3","IFNGR2","IRF1","ITGA5","ITGAV","IVNS1ABP","KLF10","KLF7","LIMK2","LYN","MAP3K5","MICAL2","NAMPT","NEDD9","NFKB1","NFKB2","NFKBIA","NFKBIZ","NINJ1","PALLD","PDLIM7","PFKFB3","PLAUR","S100A8","S100A9","SAT1","SKIL","SLC25A37","SMAD3","SMAD7","SMURF2","STAT5A","STK38L","SUSD6","TBC1D8","TGFBI","TGFBR1","TNFAIP2","TNFAIP3","TNFAIP8","TNIP1","TNS1","ULK1","VDR","VEGFA","WTAP")
+
+#####(1) gene sets and contrast mapping
+library(Seurat); library(ggplot2); library(patchwork)
+
+IFN_gene <- c("ADAR","B4GALT5","BMPR2","BTN3A1","BTN3A2","CASP1","CCL5","CD47","CEBPD",
+              "CHST11","CITED2","DDX58","DUSP6","ERAP2","FOS","GADD45B","GALNT10","GBP1","GBP2",
+              "HLA-A","HLA-C","HLA-DRA","HLA-E","ICAM1","IFI16","IFITM3","IL15","IRF1","IRF2",
+              "ISG15","JAK2","JUN","JUNB","KLF4","KLF6","KLF7","LAP3","MAP3K5","MICAL2","MX1",
+              "NEDD9","PFKFB3","PLAUR","PLSCR1","PMAIP1","PSMB8","PSME1","PSTPIP2","RBCK1",
+              "SECTM1","SMURF2","SOD2","SP100","SP110","STAT1","STAT3","STK38L","TBC1D8","TGFBI",
+              "TNFAIP2","TNFSF10","VCAN")
+
+IL1_gene <- c("ADAM19","AHR","ALOX5AP","AMPD3","BHLHE40","BID","BIRC2","BMPR2","CD82",
+              "CFLAR","CHST11","DDIT4","ELK3","FOS","HMOX1","ICAM1","IER3","IFNGR2","IRF1",
+              "ITGA5","ITGAV","IVNS1ABP","KLF10","KLF7","LIMK2","LYN","MAP3K5","MICAL2","NAMPT",
+              "NEDD9","NFKB1","NFKB2","NFKBIA","NFKBIZ","NINJ1","PALLD","PDLIM7","PFKFB3","PLAUR",
+              "S100A8","S100A9","SAT1","SKIL","SLC25A37","SMAD3","SMAD7","SMURF2","STAT5A",
+              "STK38L","SUSD6","TBC1D8","TGFBI","TGFBR1","TNFAIP2","TNFAIP3","TNFAIP8","TNIP1",
+              "TNS1","ULK1","VDR","VEGFA","WTAP")
+
+IFN_gene <- gsub("−", "-", IFN_gene)
+IL1_gene <- gsub("−", "-", IL1_gene)
+
+mut_hc  <- "Healthy controls"
+mut_i67 <- "I67R/K781TfsTer7"
+mut_e25 <- "E250K"
+cell_use <- "CD14 Monocyte"
+
+#####(2) Seurat VlnPlot function: HC vs one mutation, CD14 Monocyte
+vio_seurat <- function(sce, genes, mut_pat, pat_lab,
+                       col_hc = "#6699CC", col_pat = "#E2A9C9",
+                       cell = cell_use, assay = "RNA") {
+  genes <- genes[genes %in% rownames(sce[[assay]])]
+  if (length(genes) == 0) stop("no valid genes in assay")
+  
+  md <- sce@meta.data
+  keep <- rownames(md)[md$celltype == cell & md$mutation %in% c(mut_hc, mut_pat)]
+  sub <- sce[, keep]
+  md2 <- sub@meta.data
+  md2$plot_mut <- factor(ifelse(as.character(md2$mutation) == mut_hc, "HC", pat_lab),
+                         levels = c("HC", pat_lab))
+  sub@meta.data <- md2
+  
+  n_hc  <- sum(md2$plot_mut == "HC")
+  n_pat <- sum(md2$plot_mut == pat_lab)
+  cat("== contrast", pat_lab, "| HC n:", n_hc, "|", pat_lab, "n:", n_pat, "\n")
+  if (n_pat == 0) warning(pat_lab, " cells not matched, check mutation column")
+  
+  fill_vals <- setNames(c(col_hc, col_pat), c("HC", pat_lab))
+  expr <- tryCatch(GetAssayData(sub, assay = assay, layer = "data"),
+                   error = function(e) GetAssayData(sub, assay = assay, slot = "data"))
+  plots <- list(); stats_rows <- list()
+  
+  for (g in genes) {
+    v <- as.numeric(expr[g, ])
+    ps <- as.character(md2$plot_mut)
+    
+    p <- VlnPlot(sub, features = g, group.by = "plot_mut", assay = assay, pt.size = 0) +
+      scale_fill_manual(values = fill_vals) +
+      theme_classic() + xlab(NULL) + ylab(NULL) + ggtitle(g) +
+      theme(legend.position = "none",
+            plot.title = element_text(size = 9, hjust = 0.5),
+            axis.text.x = element_text(angle = 45, hjust = 1, size = 8, colour = "black"),
+            axis.text.y = element_text(size = 10, colour = "black"),
+            axis.ticks.x = element_blank(),
+            plot.margin = margin(2, 4, 2, 2))
+    plots[[g]] <- p
+    
+    for (gp in c("HC", pat_lab)) {
+      vv <- v[ps == gp]
+      if (length(vv) < 2) next
+      stats_rows[[length(stats_rows) + 1]] <- data.frame(
+        gene = g, celltype = cell, contrast = pat_lab, group = gp,
+        n = length(vv), mean_expr = mean(vv), median_expr = median(vv),
+        pct_expressing = mean(vv > 0) * 100, stringsAsFactors = FALSE)
+    }
+  }
+  list(plots = plots, stats = do.call(rbind, stats_rows))
+}
+
+#####(3) save pdf: 8 rows x 10 columns per page, enlarged panels
+save_vio_pdf <- function(plots, pdf_file, ncol = 10, nrow = 8,
+                         col_width = 1.6, row_height = 1.6) {
+  if (length(plots) == 0) { warning("no plots to save"); return(invisible(NULL)) }
+  dir.create(dirname(pdf_file), showWarnings = FALSE, recursive = TRUE)
+  per_page <- ncol * nrow
+  grp_idx <- split(seq_along(plots), ceiling(seq_along(plots) / per_page))
+  pdf(pdf_file, width = ncol * col_width, height = nrow * row_height)
+  on.exit(dev.off(), add = TRUE)
+  for (i in grp_idx) print(wrap_plots(plots[i], ncol = ncol))
+  cat("pdf saved:", pdf_file, "| genes:", length(plots),
+      "| pages:", length(grp_idx), "| exists:", file.exists(pdf_file), "\n")
+}
+
+out_dir <- "E:/Cohort PPT/JIA/code/CellPreprocess"
+res_ifn <- vio_seurat(pbmc1, IFN_gene, mut_i67, "I67R", col_pat = "#E2A9C9")
+res_il1 <- vio_seurat(pbmc1, IL1_gene, mut_e25, "E250K", col_pat = "#7B1FA2")
+
+save_vio_pdf(res_ifn$plots, file.path(out_dir, "IFN_gene_CD14_HC_vs_I67R.pdf"))
+save_vio_pdf(res_il1$plots, file.path(out_dir, "IL1_gene_CD14_HC_vs_E250K.pdf"))
+
+print(res_ifn$stats, row.names = FALSE)
+print(res_il1$stats, row.names = FALSE)
+
+#####(4) showing gene sets and mapping
+IFN_show <- c("DDX58","GBP1","JAK2","MX1","FOS","JUNB","KLF4",
+              "ERAP2","GADD45B","KLF6","SMURF2")
+
+IL1_show <- c("ALOX5AP","ICAM1","ITGAV","ITGA5","VEGFA","BHLHE40","HMOX1",
+              "BIRC2","CD82","IER3","SMAD3","STAT5A","ULK1","VDR",
+              "KLF10","SMAD7","SMURF2","DDIT4","ELK3","BMPR2")
+
+mut_hc  <- "Healthy controls"
+mut_i67 <- "I67R/K781TfsTer7"
+mut_e25 <- "E250K"
+cell_use <- "CD14 Monocyte"
+
+library(Seurat); library(ggplot2); library(patchwork)
+
+vio_panel <- function(sce, genes, mut_pat, pat_lab, group_colors, ncol,
+                      cell = cell_use, assay = "RNA") {
+  genes <- genes[genes %in% rownames(sce[[assay]])]
+  if (length(genes) == 0) stop("no valid genes in assay")
+  
+  md <- sce@meta.data
+  keep <- rownames(md)[md$celltype == cell & md$mutation %in% c(mut_hc, mut_pat)]
+  sub <- sce[, keep]
+  md2 <- sub@meta.data
+  md2$plot_mut <- factor(ifelse(as.character(md2$mutation) == mut_hc, "HC", pat_lab),
+                         levels = c("HC", pat_lab))
+  sub@meta.data <- md2
+  
+  n_hc  <- sum(md2$plot_mut == "HC")
+  n_pat <- sum(md2$plot_mut == pat_lab)
+  cat("== contrast", pat_lab, "| HC n:", n_hc, "|", pat_lab, "n:", n_pat, "\n")
+  if (n_pat == 0) warning(pat_lab, " cells not matched, check mutation column")
+  
+  fill_vals <- group_colors[c("HC", pat_lab)]
+  expr <- tryCatch(GetAssayData(sub, assay = assay, layer = "data"),
+                   error = function(e) GetAssayData(sub, assay = assay, slot = "data"))
+  plots <- list(); stats_rows <- list()
+  
+  for (g in genes) {
+    v <- as.numeric(expr[g, ])
+    ps <- as.character(md2$plot_mut)
+    
+    p <- VlnPlot(sub, features = g, group.by = "plot_mut", assay = assay, pt.size = 0) +
+      scale_fill_manual(values = fill_vals) +
+      theme_classic() + xlab(NULL) + ylab(NULL) + ggtitle(g) +
+      theme(legend.position = "none",
+            plot.title = element_text(size = 9, hjust = 0.5),
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank(),
+            axis.text.y = element_text(size = 10, colour = "black"),
+            plot.margin = margin(2, 4, 2, 2))
+    plots[[g]] <- p
+    
+    for (gp in c("HC", pat_lab)) {
+      vv <- v[ps == gp]
+      if (length(vv) < 2) next
+      stats_rows[[length(stats_rows) + 1]] <- data.frame(
+        gene = g, celltype = cell, contrast = pat_lab, group = gp,
+        n = length(vv), mean_expr = mean(vv), median_expr = median(vv),
+        pct_expressing = mean(vv > 0) * 100, stringsAsFactors = FALSE)
+    }
+  }
+  panel <- wrap_plots(plots, ncol = ncol)
+  list(panel = panel, plots = plots, stats = do.call(rbind, stats_rows))
+}
+
+col_ifn <- c("HC" = "#6699CC", "I67R" = "#E2A9C9")
+col_il1 <- c("HC" = "#6699CC", "E250K" = "#FFEFC1")
+
+res_ifn <- vio_panel(pbmc1, IFN_show, mut_i67, "I67R", col_ifn, ncol = length(IFN_show))
+res_il1 <- vio_panel(pbmc1, IL1_show, mut_e25, "E250K", col_il1, ncol = 10)
+
+res_ifn$panel
+res_il1$panel
+
+print(res_ifn$stats, row.names = FALSE)
+print(res_il1$stats, row.names = FALSE)
+
